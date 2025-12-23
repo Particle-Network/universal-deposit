@@ -1,0 +1,48 @@
+{
+  "name": "@particle-network/deposit-sdk",
+  "version": "0.1.0",
+  "description": "Deposit SDK for Universal Accounts - solve the empty smart account problem",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run src/__tests__/integration/"
+  },
+  "peerDependencies": {
+    "@particle-network/auth-core": "^1.5.0",
+    "@particle-network/universal-account-sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "keywords": [
+    "particle",
+    "universal-accounts",
+    "deposit",
+    "web3",
+    "blockchain"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/particle-network/deposit-sdk"
+  }
+}
