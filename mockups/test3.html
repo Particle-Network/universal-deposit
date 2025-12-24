@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Deposit Widget</title>
+    <style>
+        :root {
+            --bg-body: #000000;
+            --bg-widget: #09090b;
+            --bg-panel: #121212;
+            --bg-hover: #27272a;
+            --bg-input: #18181b;
+            --border: #27272a;
+            --border-highlight: #3f3f46;
+            --primary: #fff;
+            --text-main: #f4f4f5;
+            --text-muted: #a1a1aa;
+            --text-dim: #52525b;
+            --warning-bg: rgba(245, 158, 11, 0.1);
+            --warning-text: #fbbf24;
+            --radius-outer: 20px;
+            --radius-inner: 12px;
+            --font-mono: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+
+        body {
+            background-color: var(--bg-body);
+            background-image: 
+                radial-gradient(circle at 50% 0%, #1a1a1a 0%, #000 60%);
+            color: var(--text-main);
+            font-family: var(--font-sans);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        /* --- Main Widget --- */
+        .widget {
+            position: relative;
+            width: 380px;
+            background: var(--bg-widget);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-outer);
+            box-shadow: 0 40px 80px -20px rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            padding: 20px 24px 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h2 { font-size: 15px; font-weight: 600; color: var(--text-main); }
+        .close-btn { 
+            background: none; border: none; color: var(--text-dim); cursor: pointer; 
+            transition: color 0.2s; padding: 4px;
+        }
+        .close-btn:hover { color: var(--text-main); }
+
+        /* Selectors (Unified Pill) */
+        .controls-area {
+            padding: 0 24px;
+            margin-bottom: 16px;
+        }
+
+        .selector-pill {
+            display: flex;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-inner);
+            height: 44px;
+            position: relative;
+        }
+
+        .select-btn {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-main);
+        }
+        .select-btn:first-child { border-top-left-radius: var(--radius-inner); border-bottom-left-radius: var(--radius-inner); }
+        .select-btn:last-child { border-top-right-radius: var(--radius-inner); border-bottom-right-radius: var(--radius-inner); }
+        .select-btn:hover { background: var(--bg-hover); }
+
+        .pill-divider { width: 1px; background: var(--border); height: 20px; align-self: center; }
+        
+        .coin-icon { width: 18px; height: 18px; border-radius: 50%; }
+        .caret { opacity: 0.4; width: 10px; }
+
+        /* --- Main Panel (Address + Warning) --- */
+        .panel {
+            margin: 0 24px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-inner);
+            padding: 4px; /* Padding for the inner elements */
+            position: relative;
+        }
+
+        /* Address Row */
+        .address-row {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            gap: 10px;
+        }
+
+        .address-data {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .label { font-size: 11px; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+        
+        .addr-text {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            color: var(--text-main);
+            letter-spacing: -0.2px;
+        }
+
+        .action-group {
+            display: flex;
+            gap: 4px;
+        }
+
+        .icon-btn {
+            width: 32px; height: 32px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+        }
+        .icon-btn:hover { background: var(--bg-hover); color: var(--text-main); border-color: var(--border); }
+        
+        /* QR Overlay */
+        .qr-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: white;
+            border-radius: var(--radius-inner);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.2s;
+            z-index: 10;
+        }
+        .qr-overlay.show { opacity: 1; pointer-events: auto; }
+        .qr-overlay svg { width: 90px; height: 90px; }
+        .qr-close {
+            position: absolute; top: 8px; right: 8px;
+            background: #eee; border: none; border-radius: 4px;
+            width: 20px; height: 20px; cursor: pointer; color: #333;
+            display: flex; align-items: center; justify-content: center; font-size: 14px;
+        }
+
+        /* Warning Box */
+        .warning-box {
+            margin-top: 4px;
+            background: var(--warning-bg);
+            border: 1px solid rgba(245, 158, 11, 0.15);
+            border-radius: 8px;
+            padding: 10px 12px;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+        
+        .warning-icon { color: var(--warning-text); flex-shrink: 0; margin-top: 1px; }
+        .warning-text { font-size: 11px; line-height: 1.4; color: var(--warning-text); opacity: 0.9; }
+
+        /* --- History Section --- */
+        .history-section {
+            margin-top: 24px;
+            border-top: 1px solid var(--border);
+            background: var(--bg-panel);
+        }
+
+        .hist-header {
+            padding: 16px 24px 8px 24px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .hist-list {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .hist-item {
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            cursor: default;
+            transition: background 0.1s;
+        }
+        .hist-item:last-child { border-bottom: none; }
+        .hist-item:hover { background: var(--bg-input); }
+
+        .hist-left { display: flex; align-items: center; gap: 12px; }
+        
+        .hist-icon-box {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: center;
+            color: #4ade80; /* Success green */
+        }
+        
+        .hist-info h4 { font-size: 13px; font-weight: 500; color: var(--text-main); margin-bottom: 2px; }
+        .hist-info p { font-size: 11px; color: var(--text-muted); }
+
+        .hist-amount { font-size: 13px; font-weight: 500; color: var(--text-main); font-family: var(--font-mono); }
+
+
+        /* Dropdown Logic */
+        .dropdown {
+            position: absolute;
+            top: 100%; left: 0; right: 0;
+            margin-top: 6px;
+            background: var(--bg-widget);
+            border: 1px solid var(--border-highlight);
+            border-radius: var(--radius-inner);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 100;
+            display: none;
+            padding: 4px;
+        }
+        .dropdown.show { display: block; animation: fadeUp 0.15s ease; }
+        
+        .dd-item {
+            padding: 10px;
+            font-size: 13px;
+            color: var(--text-muted);
+            display: flex; align-items: center; gap: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .dd-item:hover { background: var(--bg-hover); color: var(--text-main); }
+        .dd-item.active { background: var(--bg-hover); color: white; }
+
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+    </style>
+</head>
+<body>
+
+    <div class="widget">
+        <div class="header">
+            <h2>Deposit Assets</h2>
+            <button class="close-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"></path></svg>
+            </button>
+        </div>
+
+        <div class="controls-area">
+            <div class="selector-pill">
+                
+                <div class="select-btn" id="tokenTrigger">
+                    <div id="tokenIcon"></div>
+                    <span id="tokenName">USDC</span>
+                    <svg class="caret" width="10" height="6" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 1L5 5L9 1"></path></svg>
+                    
+                    </div>
+
+                <div class="pill-divider"></div>
+
+                <div class="select-btn" id="chainTrigger">
+                    <div id="chainIcon"></div>
+                    <span id="chainName">Arbitrum</span>
+                    <svg class="caret" width="10" height="6" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 1L5 5L9 1"></path></svg>
+                </div>
+
+                <div id="tokenList" class="dropdown" style="width: 48%; left: 0;"></div>
+                <div id="chainList" class="dropdown" style="width: 48%; left: auto; right: 0;"></div>
+            </div>
+        </div>
+
+        <div class="panel">
+            
+            <div class="address-row">
+                <div class="address-data">
+                    <span class="label">Deposit Address</span>
+                    <span class="addr-text" id="addrDisplay">0x7a...8b21</span>
+                </div>
+                <div class="action-group">
+                    <button class="icon-btn" title="Copy" onclick="copyAddr(this)">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    </button>
+                    <button class="icon-btn" title="QR Code" onclick="toggleQR()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><path d="M3 14h7v7h-7z"></path></svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="qr-overlay" id="qrLayer">
+                <button class="qr-close" onclick="toggleQR()">✕</button>
+                <svg viewBox="0 0 33 33" shape-rendering="crispEdges">
+                   <rect x="0" y="0" width="33" height="33" fill="#ffffff"/>
+                   <path d="M4 4h7v7h-7z M22 4h7v7h-7z M4 22h7v7h-7z M14 4h3v3h-3z M18 8h3v3h-3z M8 14h3v3h-3z M22 18h3v3h-3z M14 20h3v3h-3z" fill="#000000"/>
+                   <rect x="12" y="12" width="9" height="9" fill="#000000" fill-opacity="0.8"/>
+                </svg>
+            </div>
+
+            <div class="warning-box">
+                <svg class="warning-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                <span class="warning-text">Only deposit <strong>USDC</strong> on <strong>Arbitrum</strong>. Sending other assets may result in permanent loss.</span>
+            </div>
+        </div>
+
+        <div class="history-section">
+            <div class="hist-header">Recent Activity</div>
+            <div class="hist-list">
+                
+                <div class="hist-item">
+                    <div class="hist-left">
+                        <div class="hist-icon-box">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        </div>
+                        <div class="hist-info">
+                            <h4>Received USDC</h4>
+                            <p>Today, 10:42 AM</p>
+                        </div>
+                    </div>
+                    <div class="hist-amount">+500.00</div>
+                </div>
+
+                <div class="hist-item">
+                    <div class="hist-left">
+                        <div class="hist-icon-box" style="color: #a1a1aa; border-color: #333; background: transparent;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                        </div>
+                        <div class="hist-info">
+                            <h4 style="color: var(--text-muted);">Confirming...</h4>
+                            <p>ETH • 1 min ago</p>
+                        </div>
+                    </div>
+                    <div class="hist-amount" style="color: var(--text-muted);">+0.55</div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Icons
+        const svgs = {
+            usdc: `<svg viewBox="0 0 24 24" fill="#2775ca" class="coin-icon"><circle cx="12" cy="12" r="12"/></svg>`,
+            usdt: `<svg viewBox="0 0 24 24" fill="#26a17b" class="coin-icon"><circle cx="12" cy="12" r="12"/></svg>`,
+            eth: `<svg viewBox="0 0 24 24" fill="#627eea" class="coin-icon"><circle cx="12" cy="12" r="12"/></svg>`,
+            arb: `<svg viewBox="0 0 24 24" fill="#12aaeb" class="coin-icon"><circle cx="12" cy="12" r="12"/></svg>`,
+            mainnet: `<svg viewBox="0 0 24 24" fill="#627eea" class="coin-icon"><circle cx="12" cy="12" r="12"/></svg>`,
+        };
+
+        const tokens = [
+            { id: 'usdc', name: 'USDC', icon: svgs.usdc },
+            { id: 'usdt', name: 'USDT', icon: svgs.usdt },
+            { id: 'eth', name: 'ETH', icon: svgs.eth },
+        ];
+        const chains = [
+            { id: 'arb', name: 'Arbitrum', icon: svgs.arb },
+            { id: 'eth', name: 'Ethereum', icon: svgs.mainnet },
+        ];
+
+        let curToken = tokens[0];
+        let curChain = chains[0];
+
+        function init() {
+            renderList('tokenList', tokens, 'token');
+            renderList('chainList', chains, 'chain');
+            updateState();
+
+            // Toggle Dropdowns
+            document.getElementById('tokenTrigger').onclick = (e) => {
+                e.stopPropagation(); toggle('tokenList');
+            };
+            document.getElementById('chainTrigger').onclick = (e) => {
+                e.stopPropagation(); toggle('chainList');
+            };
+            document.body.onclick = () => {
+                document.querySelectorAll('.dropdown').forEach(el => el.classList.remove('show'));
+            };
+        }
+
+        function toggle(id) {
+            document.querySelectorAll('.dropdown').forEach(el => {
+                if(el.id !== id) el.classList.remove('show');
+            });
+            document.getElementById(id).classList.toggle('show');
+        }
+
+        function renderList(elId, data, type) {
+            const el = document.getElementById(elId);
+            el.innerHTML = data.map(item => `
+                <div class="dd-item" onclick="select('${type}', '${item.id}')">
+                    ${item.icon} ${item.name}
+                </div>
+            `).join('');
+        }
+
+        window.select = (type, id) => {
+            if(type === 'token') curToken = tokens.find(t => t.id === id);
+            if(type === 'chain') curChain = chains.find(c => c.id === id);
+            updateState();
+        };
+
+        function updateState() {
+            // Update Headers
+            document.getElementById('tokenIcon').innerHTML = curToken.icon;
+            document.getElementById('tokenName').innerText = curToken.name;
+            document.getElementById('chainIcon').innerHTML = curChain.icon;
+            document.getElementById('chainName').innerText = curChain.name;
+
+            // Update Address
+            const rand = Math.floor(Math.random()*16777215).toString(16);
+            document.getElementById('addrDisplay').innerText = `0x${rand}...${Math.floor(Math.random()*9999)}`;
+
+            // Update Warning Text
+            const warnText = document.querySelector('.warning-text');
+            warnText.innerHTML = `Only deposit <strong>${curToken.name}</strong> on <strong>${curChain.name}</strong>. Sending other assets may result in permanent loss.`;
+        }
+
+        window.toggleQR = () => {
+            document.getElementById('qrLayer').classList.toggle('show');
+        };
+
+        window.copyAddr = (btn) => {
+            const txt = document.getElementById('addrDisplay').innerText;
+            navigator.clipboard.writeText(txt);
+            
+            // Visual feedback on the SVG
+            btn.style.color = "#4ade80";
+            setTimeout(() => btn.style.color = "", 1000);
+        };
+
+        init();
+    </script>
+</body>
+</html>

@@ -18,17 +18,36 @@ export interface Signer {
   signMessage: (message: string | Uint8Array) => Promise<string>;
 }
 
+/**
+ * Auth Core provider interface for signing UA transactions
+ * This is the intermediary wallet's provider from Particle Auth Core
+ */
+export interface AuthCoreProvider {
+  signMessage: (message: string) => Promise<string>;
+}
+
 export interface DestinationConfig {
   address?: string;
   chainId?: number;
 }
 
 export interface DepositClientConfig {
-  // User's connected wallet (provider-agnostic)
+  // User's connected wallet address (EOA from Privy, RainbowKit, etc.)
+  // This is where swept funds will be sent
   ownerAddress: string;
 
-  // Signer for UA transactions (works with any provider)
-  signer: Signer;
+  // Intermediary address from Particle Auth Core (useEthereum().address)
+  // This is the EOA that owns the Universal Account
+  // Required for sweep operations
+  intermediaryAddress: string;
+
+  // Auth Core provider for signing UA transactions
+  // This comes from useEthereum().provider in @particle-network/auth-core-modal
+  // Required for sweep operations
+  authCoreProvider?: AuthCoreProvider;
+
+  // Legacy signer (deprecated - use authCoreProvider instead)
+  signer?: Signer;
 
   // Destination configuration
   destination?: DestinationConfig;
@@ -42,7 +61,7 @@ export interface DepositClientConfig {
   minValueUSD?: number;
   pollingIntervalMs?: number;
 
-  // Advanced options
+  // Advanced options (internal use)
   jwtServiceUrl?: string;
 }
 

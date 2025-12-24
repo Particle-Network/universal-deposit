@@ -26,12 +26,16 @@ import {
 } from '../constants';
 import { DEFAULT_SUPPORTED_TOKENS } from '../constants/tokens';
 import { IntermediaryService } from '../intermediary';
+import { UAManager } from '../universal-account';
+import { BalanceWatcher, Sweeper } from '../sweep';
 
 export interface ResolvedConfig {
   projectId: string;
   clientKey: string;
   appId: string;
   ownerAddress: string;
+  intermediaryAddress: string;
+  authCoreProvider: DepositClientConfig['authCoreProvider'];
   signer: DepositClientConfig['signer'];
   destination: {
     address: string;
@@ -54,6 +58,9 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
   // Services
   private intermediaryService: IntermediaryService;
   private intermediarySession: IntermediarySession | null = null;
+  private uaManager: UAManager | null = null;
+  private balanceWatcher: BalanceWatcher | null = null;
+  private sweeper: Sweeper | null = null;
 
   constructor(config: DepositClientConfig) {
     super();
@@ -77,13 +84,18 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     if (!config.ownerAddress?.trim()) {
       throw new ConfigurationError('ownerAddress is required');
     }
-    if (!config.signer?.signMessage) {
-      throw new ConfigurationError('signer with signMessage function is required');
+
+    if (!config.intermediaryAddress?.trim()) {
+      throw new ConfigurationError('intermediaryAddress is required (from useEthereum().address)');
     }
 
     // Validate address format (basic check)
     if (!this.isValidAddress(config.ownerAddress)) {
       throw new ConfigurationError('ownerAddress must be a valid EVM address');
+    }
+
+    if (!this.isValidAddress(config.intermediaryAddress)) {
+      throw new ConfigurationError('intermediaryAddress must be a valid EVM address');
     }
 
     return {
@@ -92,6 +104,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       clientKey: DEFAULT_CLIENT_KEY,
       appId: DEFAULT_APP_ID,
       ownerAddress: config.ownerAddress.trim().toLowerCase(),
+      intermediaryAddress: config.intermediaryAddress.trim().toLowerCase(),
+      authCoreProvider: config.authCoreProvider,
       signer: config.signer,
       destination: {
         address: config.destination?.address?.trim().toLowerCase() || config.ownerAddress.trim().toLowerCase(),
@@ -122,18 +136,53 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     this.setStatus('initializing');
 
     try {
-      // Phase 2: Get JWT session for intermediary wallet
-      this.intermediarySession = await this.intermediaryService.getSession(
-        this.config.ownerAddress
-      );
-      
-      console.log('[DepositSDK] Intermediary session created:', {
-        intermediaryAddress: this.intermediarySession.intermediaryAddress,
-        expiresAt: new Date(this.intermediarySession.expiresAt * 1000).toISOString(),
+      // Use the intermediary address provided by the consumer
+      // This address comes from useEthereum().address after JWT connection
+      console.log('[DepositSDK] Using intermediary address:', this.config.intermediaryAddress);
+
+      // Create a synthetic session with the provided intermediary address
+      // No need to fetch JWT since the consumer already connected Auth Core
+      this.intermediarySession = {
+        jwt: '', // Not needed - consumer already connected
+        intermediaryAddress: this.config.intermediaryAddress,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600, // 1 hour placeholder
+      };
+
+      // Initialize UAManager with the intermediary address
+      this.uaManager = new UAManager({
+        ownerAddress: this.config.ownerAddress,
+        session: this.intermediarySession,
+      });
+      await this.uaManager.initialize();
+
+      // Get deposit addresses
+      this.depositAddresses = this.uaManager.getDepositAddresses();
+
+      console.log('[DepositSDK] Deposit addresses:', this.depositAddresses);
+
+      // Phase 4: Initialize BalanceWatcher and Sweeper
+      this.balanceWatcher = new BalanceWatcher({
+        uaManager: this.uaManager,
+        pollingIntervalMs: this.config.pollingIntervalMs,
+        minValueUSD: this.config.minValueUSD,
+        supportedTokens: this.config.supportedTokens,
+        supportedChains: this.config.supportedChains,
       });
 
-      // TODO: Phase 3 - Initialize UAManager with intermediary address
-      // TODO: Get deposit addresses
+      this.sweeper = new Sweeper({
+        uaManager: this.uaManager,
+        authCoreProvider: this.config.authCoreProvider,
+        destination: this.config.destination,
+      });
+
+      // Wire up balance watcher events
+      this.balanceWatcher.on('deposit:detected', (deposit) => {
+        this.handleDepositDetected(deposit);
+      });
+
+      this.balanceWatcher.on('error', (error) => {
+        this.emit('deposit:error', error);
+      });
 
       this.setStatus('ready');
     } catch (error) {
@@ -149,6 +198,16 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     this.depositAddresses = null;
     this.intermediarySession = null;
     this.intermediaryService.clearSession();
+    if (this.balanceWatcher) {
+      this.balanceWatcher.stop();
+      this.balanceWatcher.removeAllListeners();
+      this.balanceWatcher = null;
+    }
+    this.sweeper = null;
+    if (this.uaManager) {
+      this.uaManager.destroy();
+      this.uaManager = null;
+    }
     this.setStatus('idle');
   }
 
@@ -168,8 +227,18 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       return this.depositAddresses;
     }
 
-    // TODO: Phase 3 - Get from UAManager
-    throw new Error('Not implemented: getDepositAddresses');
+    if (!this.uaManager) {
+      throw new ConfigurationError('Client not initialized. Call initialize() first.');
+    }
+
+    return this.uaManager.getDepositAddresses();
+  }
+
+  /**
+   * Get the UAManager instance (for advanced use)
+   */
+  getUAManager(): UAManager | null {
+    return this.uaManager;
   }
 
   // ============================================
@@ -181,29 +250,69 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       throw new ConfigurationError('Client must be initialized before watching');
     }
 
+    if (!this.balanceWatcher) {
+      throw new ConfigurationError('BalanceWatcher not initialized');
+    }
+
+    this.balanceWatcher.start();
     this.setStatus('watching');
-    // TODO: Phase 4 - Start BalanceWatcher
+    console.log('[DepositSDK] Started watching for deposits');
   }
 
   stopWatching(): void {
-    if (this.status === 'watching') {
-      // TODO: Phase 4 - Stop BalanceWatcher
+    if (this.status === 'watching' && this.balanceWatcher) {
+      this.balanceWatcher.stop();
       this.setStatus('ready');
+      console.log('[DepositSDK] Stopped watching for deposits');
     }
   }
 
   async checkBalances(): Promise<DetectedDeposit[]> {
-    // TODO: Phase 4 - Manual balance check
-    throw new Error('Not implemented: checkBalances');
+    if (!this.balanceWatcher) {
+      throw new ConfigurationError('Client not initialized');
+    }
+    return this.balanceWatcher.getCurrentBalances();
   }
 
   // ============================================
   // Sweeping
   // ============================================
 
-  async sweep(_depositId?: string): Promise<SweepResult[]> {
-    // TODO: Phase 4 - Manual sweep
-    throw new Error('Not implemented: sweep');
+  async sweep(depositId?: string): Promise<SweepResult[]> {
+    if (!this.sweeper) {
+      throw new ConfigurationError('Client not initialized');
+    }
+
+    const results: SweepResult[] = [];
+
+    if (depositId) {
+      // Sweep specific deposit
+      const deposit = this.pendingDeposits.get(depositId);
+      if (!deposit) {
+        throw new ConfigurationError(`Deposit ${depositId} not found`);
+      }
+      const result = await this.sweeper.sweep(deposit);
+      results.push(result);
+    } else {
+      // Sweep all pending deposits
+      for (const deposit of this.pendingDeposits.values()) {
+        try {
+          const result = await this.sweeper.sweep(deposit);
+          results.push(result);
+        } catch (error) {
+          console.error(`[DepositSDK] Failed to sweep ${deposit.id}:`, error);
+          results.push({
+            depositId: deposit.id,
+            transactionId: '',
+            explorerUrl: '',
+            status: 'failed',
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+      }
+    }
+
+    return results;
   }
 
   // ============================================
@@ -248,6 +357,50 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     if (this.status !== status) {
       this.status = status;
       this.emit('status:change', status);
+    }
+  }
+
+  /**
+   * Handle a detected deposit
+   */
+  private handleDepositDetected(deposit: DetectedDeposit): void {
+    console.log('[DepositSDK] Deposit detected:', deposit);
+
+    // Store in pending deposits
+    this.pendingDeposits.set(deposit.id, deposit);
+
+    // Emit event
+    this.emit('deposit:detected', deposit);
+
+    // Auto-sweep if enabled
+    if (this.config.autoSweep && this.sweeper) {
+      this.emit('deposit:processing', deposit);
+      this.setStatus('sweeping');
+
+      this.sweeper.sweep(deposit)
+        .then((result) => {
+          // Remove from pending
+          this.pendingDeposits.delete(deposit.id);
+          this.emit('deposit:complete', result);
+          
+          // Return to watching if still active
+          if (this.balanceWatcher?.isActive()) {
+            this.setStatus('watching');
+          } else {
+            this.setStatus('ready');
+          }
+        })
+        .catch((error) => {
+          console.error('[DepositSDK] Auto-sweep failed:', error);
+          this.emit('deposit:error', error, deposit);
+          
+          // Return to watching if still active
+          if (this.balanceWatcher?.isActive()) {
+            this.setStatus('watching');
+          } else {
+            this.setStatus('ready');
+          }
+        });
     }
   }
 }

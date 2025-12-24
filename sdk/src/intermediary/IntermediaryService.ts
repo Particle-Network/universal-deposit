@@ -1,9 +1,14 @@
 /**
  * IntermediaryService - Manages JWT authentication and session with the intermediary wallet
+ * 
+ * This service handles:
+ * 1. Fetching JWT from the Cloudflare Worker
+ * 2. Connecting to Particle Auth Core with the JWT
+ * 3. Providing the Auth Core provider for signing UA transactions
  */
 
 import { JwtError, AuthenticationError } from '../core/errors';
-import type { JwtResponse, IntermediarySession } from '../core/types';
+import type { JwtResponse, IntermediarySession, AuthCoreProvider } from '../core/types';
 import { DEFAULT_JWT_SERVICE_URL } from '../constants';
 
 export interface IntermediaryConfig {
@@ -11,6 +16,11 @@ export interface IntermediaryConfig {
   clientKey: string;
   appId: string;
   jwtServiceUrl: string;
+}
+
+export interface AuthCoreConnection {
+  address: string;
+  provider: AuthCoreProvider;
 }
 
 export class IntermediaryService {

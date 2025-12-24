@@ -55,7 +55,7 @@ describe('JWT Worker Integration', () => {
     console.log('   JWT length:', session.jwt.length);
     console.log('   Expires at:', new Date(session.expiresAt * 1000).toISOString());
     console.log('   Intermediary:', session.intermediaryAddress);
-  });
+  }, 30000);
 
   it('should cache session on subsequent calls', async () => {
     const service = new IntermediaryService({
@@ -76,7 +76,7 @@ describe('JWT Worker Integration', () => {
     expect(session1.expiresAt).toBe(session2.expiresAt);
 
     console.log('✅ Session caching works correctly');
-  });
+  }, 30000);
 
   it('should decode JWT payload correctly', async () => {
     const service = new IntermediaryService({
@@ -113,5 +113,5 @@ describe('JWT Worker Integration', () => {
     console.log('   Subject:', payload.sub);
     console.log('   Issuer:', payload.iss);
     console.log('   Audience:', payload.aud);
-  });
+  }, 30000);
 });

@@ -52,3 +52,11 @@ export {
   DEFAULT_POLLING_INTERVAL_MS,
 } from './constants';
 export type { ChainId } from './constants/chains';
+
+// UAManager (for advanced use)
+export { UAManager } from './universal-account';
+export type { UAManagerConfig, SmartAccountOptions, PrimaryAsset, PrimaryAssetsResponse } from './universal-account';
+
+// Sweep (for advanced use)
+export { BalanceWatcher, Sweeper } from './sweep';
+export type { BalanceWatcherConfig, BalanceSnapshot, SweeperConfig, SweepAttempt } from './sweep';

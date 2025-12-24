@@ -8,51 +8,35 @@ Universal Accounts are smart accounts — they start empty. Users need a way to 
 
 - **Deposit addresses** — EVM + Solana smart account addresses for receiving funds
 - **Auto-sweep** — Automatically move deposited funds to a configurable destination
-- **EOA detection** — Detect tokens in user's connected wallet for one-click deposits
-- **Pre-built UI** — Optional modal/widget components (coming in Phase 6)
+- **Pre-built UI** — Modal/widget components for easy integration
 - **Headless mode** — Full programmatic control for custom UIs
+- **Multi-chain support** — 17 chains including Ethereum, Arbitrum, Base, Solana, and more
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │  User's EOA     │     │  Intermediary   │     │  Universal      │
-│  (Any Provider) │ ──▶ │  Wallet (JWT)   │ ──▶ │  Account        │
+│  (Privy, etc.)  │ ──▶ │  Wallet (JWT)   │ ──▶ │  Account        │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
-                               │                        │
-                               │ owns                   │ deposit addresses
-                               ▼                        ▼
-                        ┌─────────────────┐     ┌─────────────────┐
-                        │  Signs UA       │     │  EVM + Solana   │
-                        │  transactions   │     │  Smart Accounts │
-                        └─────────────────┘     └─────────────────┘
+        │                       │                        │
+        │ sweep destination     │ owns & signs           │ deposit addresses
+        ▼                       ▼                        ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Receives swept │     │  Auth Core      │     │  EVM + Solana   │
+│  funds (Arb)    │     │  Provider       │     │  Smart Accounts │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
 ### Key Concepts
 
-1. **Intermediary Wallet**: A JWT-based embedded wallet that owns the Universal Account. Created automatically by the SDK using a hosted JWT service.
+1. **Intermediary Wallet**: A JWT-based embedded wallet (via Particle Auth Core) that owns the Universal Account. The consumer app connects to Auth Core and provides the address and provider to the SDK.
 
-2. **JWT Service**: A Cloudflare Worker (`deposit-auth-worker.deposit-kit.workers.dev`) that issues JWTs for intermediary wallet creation. Credentials are baked into the SDK - developers don't configure this.
+2. **Universal Account**: The smart account that provides deposit addresses and chain abstraction features. Created using the intermediary wallet's address.
 
-3. **Universal Account**: The smart account that provides deposit addresses and chain abstraction features.
+3. **Auth Core Provider**: The signing provider from `@particle-network/auth-core-modal` that signs sweep transactions. Must be connected via JWT before initializing the SDK.
 
-4. **Provider-Agnostic**: Works with any wallet provider (Privy, RainbowKit, Particle Connect, Dynamic, etc.) - only requires `ownerAddress` and `signer`.
-
-## Current Status
-
-### ✅ Completed (Phases 1-2)
-
-- **Phase 1**: Core SDK architecture, types, event system, error handling
-- **Phase 2**: IntermediaryService with JWT authentication and session caching
-
-### 🚧 In Progress
-
-- **Phase 3**: UAManager for Universal Account operations
-- **Phase 4**: Balance watching & auto-sweep
-- **Phase 5**: EOA detection & deposit
-- **Phase 6**: UI components
-- **Phase 7**: Testing & documentation
-- **Phase 8**: npm publishing
+4. **Sweep Flow**: Deposits are detected via balance polling, then automatically swept to the user's connected wallet on Arbitrum.
 
 ## Installation
 
@@ -62,93 +46,52 @@ npm install @particle-network/deposit-sdk
 
 ## Usage
 
-### Basic Example
+### With Privy + Particle Auth Core (Recommended)
+
+This is the recommended integration pattern using Privy for user authentication and Particle Auth Core for the intermediary wallet.
 
 ```typescript
 import { DepositClient } from '@particle-network/deposit-sdk';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { useConnect, useEthereum } from '@particle-network/auth-core-modal';
+import { AuthType } from '@particle-network/auth-core';
 
-// Create client (works with any wallet provider)
-const client = new DepositClient({
-  ownerAddress: '0x...', // User's wallet address
-  signer: {
-    signMessage: (msg) => wallet.signMessage(msg),
-  },
+// 1. Get user's wallet from Privy
+const { wallets } = useWallets();
+const userWallet = wallets[0];
+
+// 2. Connect to Particle Auth Core with JWT
+const { connect: jwtConnect, connected: particleConnected } = useConnect();
+const { address: intermediaryAddress, provider: authCoreProvider } = useEthereum();
+
+// Fetch JWT and connect (do this after Privy login)
+const jwt = await fetchJwtFromWorker(userWallet.address);
+await jwtConnect({
+  provider: AuthType.jwt,
+  thirdpartyCode: jwt,
 });
 
-// Initialize (creates intermediary wallet and UA)
+// 3. Create DepositClient with both addresses
+const client = new DepositClient({
+  ownerAddress: userWallet.address,           // User's Privy wallet (sweep destination)
+  intermediaryAddress: intermediaryAddress,    // JWT wallet from useEthereum()
+  authCoreProvider: {
+    signMessage: (msg) => authCoreProvider.signMessage(msg),
+  },
+  autoSweep: true,
+});
+
+// 4. Initialize and start watching
 await client.initialize();
+client.startWatching();
 
-// Get deposit addresses
-const { evm, solana } = await client.getDepositAddresses();
-
-// Listen for deposits
+// 5. Listen for events
 client.on('deposit:detected', (deposit) => {
-  console.log('Deposit detected:', deposit);
+  console.log('Deposit detected:', deposit.token, deposit.chainId);
 });
 
 client.on('deposit:complete', (result) => {
-  console.log('Swept to:', result.explorerUrl);
-});
-
-// Start watching for deposits
-client.startWatching();
-```
-
-### With Different Wallet Providers
-
-#### Privy
-
-```typescript
-import { useWallets } from '@privy-io/react-auth';
-
-const { wallets } = useWallets();
-const wallet = wallets[0];
-
-const client = new DepositClient({
-  ownerAddress: wallet.address,
-  signer: {
-    signMessage: async (msg) => {
-      const provider = await wallet.getEthereumProvider();
-      return provider.request({
-        method: 'personal_sign',
-        params: [msg, wallet.address],
-      });
-    },
-  },
-});
-```
-
-#### RainbowKit / wagmi
-
-```typescript
-import { useAccount, useSignMessage } from 'wagmi';
-
-const { address } = useAccount();
-const { signMessageAsync } = useSignMessage();
-
-const client = new DepositClient({
-  ownerAddress: address,
-  signer: { signMessage: signMessageAsync },
-});
-```
-
-#### Particle Connect
-
-```typescript
-import { useWallets, useAccount } from '@particle-network/connectkit';
-
-const [primaryWallet] = useWallets();
-const { address } = useAccount();
-const walletClient = primaryWallet?.getWalletClient();
-
-const client = new DepositClient({
-  ownerAddress: address,
-  signer: {
-    signMessage: (msg) => walletClient.signMessage({
-      account: address,
-      message: { raw: msg },
-    }),
-  },
+  console.log('Swept successfully:', result.explorerUrl);
 });
 ```
 
@@ -157,8 +100,13 @@ const client = new DepositClient({
 ```typescript
 const client = new DepositClient({
   // Required
-  ownerAddress: '0x...',
-  signer: { signMessage: ... },
+  ownerAddress: '0x...',           // User's wallet (sweep destination)
+  intermediaryAddress: '0x...',    // JWT wallet from useEthereum().address
+
+  // Required for sweep operations
+  authCoreProvider: {
+    signMessage: (msg) => authCoreProvider.signMessage(msg),
+  },
 
   // Optional
   destination: {
@@ -166,11 +114,152 @@ const client = new DepositClient({
     chainId: 42161,   // Defaults to Arbitrum
   },
   supportedTokens: ['ETH', 'USDC', 'USDT'], // Defaults to all
-  supportedChains: [1, 42161, 8453],        // Defaults to all
+  supportedChains: [1, 42161, 8453],        // Defaults to all 17 chains
   autoSweep: true,                          // Default: true
   minValueUSD: 0.5,                         // Default: 0.5
   pollingIntervalMs: 8000,                  // Default: 8000
 });
+```
+
+### Supported Chains
+
+The SDK supports 17 chains:
+
+| Chain | Chain ID | Assets |
+|-------|----------|--------|
+| Ethereum | 1 | USDC, USDT, ETH, BTC |
+| Optimism | 10 | USDC, USDT, ETH, BTC |
+| BNB Chain | 56 | USDC, USDT, ETH, BTC, BNB |
+| Polygon | 137 | USDC, USDT, ETH, BTC |
+| Base | 8453 | USDC, ETH, BTC |
+| Arbitrum | 42161 | USDC, USDT, ETH, BTC |
+| Avalanche | 43114 | USDC, USDT, ETH, BTC |
+| Linea | 59144 | USDC, USDT, ETH, BTC |
+| HyperEVM | 999 | USDT |
+| Mantle | 5000 | USDT |
+| Merlin | 4200 | — |
+| X Layer | 196 | USDC, USDT |
+| Monad | 143 | USDC |
+| Sonic | 146 | USDC |
+| Plasma | 9745 | USDT |
+| Berachain | 80094 | USDC |
+| Solana | 101 | USDC, USDT, SOL |
+
+## React Components
+
+The SDK includes pre-built React components for easy integration.
+
+### Installation
+
+```bash
+npm install @particle-network/deposit-sdk
+# React components require React 18+
+```
+
+### DepositWidget
+
+A complete deposit widget with token/chain selection, address display, QR code, and activity history.
+
+```tsx
+import { DepositWidget } from '@particle-network/deposit-sdk/react';
+import { DepositClient } from '@particle-network/deposit-sdk';
+
+function App() {
+  const client = new DepositClient({
+    ownerAddress: '0x...',
+    signer: { signMessage: ... },
+  });
+
+  return (
+    <DepositWidget 
+      client={client}
+      theme="dark"
+      onClose={() => console.log('closed')}
+    />
+  );
+}
+```
+
+### DepositModal
+
+A modal wrapper for the DepositWidget with backdrop and escape key handling.
+
+```tsx
+import { useState } from 'react';
+import { DepositModal } from '@particle-network/deposit-sdk/react';
+
+function App() {
+  const [isOpen, setIsOpen] = useState(false);
+  const client = /* your DepositClient */;
+
+  return (
+    <>
+      <button onClick={() => setIsOpen(true)}>Deposit</button>
+      <DepositModal
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        client={client}
+        theme="dark"
+      />
+    </>
+  );
+}
+```
+
+### useDepositClient Hook
+
+A React hook that manages the DepositClient lifecycle and state.
+
+```tsx
+import { useDepositClient } from '@particle-network/deposit-sdk/react';
+
+function DepositButton() {
+  const {
+    client,
+    status,
+    depositAddresses,
+    pendingDeposits,
+    isInitialized,
+    isWatching,
+    error,
+    initialize,
+    startWatching,
+    stopWatching,
+    sweep,
+  } = useDepositClient({
+    ownerAddress: '0x...',
+    signer: { signMessage: ... },
+    autoInitialize: true,  // Auto-initialize on mount
+    autoWatch: false,      // Don't auto-start watching
+  });
+
+  if (!isInitialized) return <p>Initializing...</p>;
+
+  return (
+    <div>
+      <p>EVM Address: {depositAddresses?.evm}</p>
+      <p>Status: {status}</p>
+      <button onClick={startWatching} disabled={isWatching}>
+        Start Watching
+      </button>
+      <button onClick={stopWatching} disabled={!isWatching}>
+        Stop Watching
+      </button>
+    </div>
+  );
+}
+```
+
+### Styling
+
+The components use Tailwind CSS classes. Make sure Tailwind is configured in your project, or override styles using the `className` prop.
+
+```tsx
+<DepositWidget
+  client={client}
+  className="my-custom-class"
+  theme="light" // or "dark"
+/>
 ```
 
 ## Project Structure
@@ -189,27 +278,39 @@ sdk/
 │   │   ├── IntermediaryService.ts # JWT authentication & session management
 │   │   └── index.ts
 │   │
-│   ├── universal-account/         # [Phase 3] UA operations
-│   │   └── UAManager.ts
+│   ├── universal-account/         # UA operations
+│   │   ├── UAManager.ts          # Universal Account initialization & addresses
+│   │   └── index.ts
 │   │
-│   ├── sweep/                     # [Phase 4] Balance watching & sweeping
-│   │   ├── BalanceWatcher.ts
-│   │   ├── Sweeper.ts
-│   │   └── strategies.ts
+│   ├── sweep/                     # Balance watching & sweeping
+│   │   ├── BalanceWatcher.ts     # Polls for balance changes
+│   │   ├── Sweeper.ts            # Multi-strategy sweep logic
+│   │   └── index.ts
 │   │
-│   ├── eoa/                       # [Phase 5] EOA detection
-│   │   ├── EOADetector.ts
-│   │   └── EOADepositor.ts
+│   ├── types/
+│   │   └── particle-sdk.d.ts     # Type declarations for UA SDK
+│   │
+│   ├── react/                      # React components & hooks
+│   │   ├── components/
+│   │   │   ├── DepositWidget.tsx  # Main deposit widget
+│   │   │   └── DepositModal.tsx   # Modal wrapper
+│   │   ├── hooks/
+│   │   │   └── useDepositClient.ts # React hook for client
+│   │   ├── utils/
+│   │   │   └── cn.ts              # Class name utility
+│   │   └── index.ts
 │   │
 │   ├── constants/
 │   │   ├── chains.ts             # Chain configurations
 │   │   ├── tokens.ts             # Token addresses
-│   │   └── index.ts              # Default values
+│   │   └── index.ts              # Default values & baked-in credentials
 │   │
 │   ├── __tests__/
 │   │   ├── integration/          # Integration tests (real API calls)
-│   │   │   └── jwt-worker.integration.test.ts
-│   │   └── *.test.ts             # Unit tests (mocked)
+│   │   │   ├── jwt-worker.integration.test.ts
+│   │   │   └── ua-manager.integration.test.ts
+│   │   ├── BalanceWatcher.test.ts
+│   │   └── IntermediaryService.test.ts
 │   │
 │   └── index.ts                  # Public exports
 │
@@ -292,13 +393,8 @@ Manages JWT authentication with the hosted JWT service. Handles session caching,
 - URL: `https://deposit-auth-worker.deposit-kit.workers.dev`
 - Credentials: Baked into SDK (not configurable)
 
-**Chains:**
-- Ethereum (1)
-- Arbitrum (42161) - Default destination
-- Base (8453)
-- Polygon (137)
-- BNB Chain (56)
-- Solana (101)
+**Default Destination:**
+- Arbitrum (42161)
 
 **Tokens:**
 - ETH, USDC, USDT, BTC, SOL, BNB
@@ -407,16 +503,16 @@ client.removeAllListeners();
 
 - [x] **Phase 1**: Core architecture, types, events
 - [x] **Phase 2**: JWT service integration
-- [ ] **Phase 3**: Universal Account management
-- [ ] **Phase 4**: Balance watching & auto-sweep
+- [x] **Phase 3**: Universal Account management
+- [x] **Phase 4**: Balance watching & auto-sweep
 - [ ] **Phase 5**: EOA detection & deposit
-- [ ] **Phase 6**: UI components (React)
+- [x] **Phase 6**: UI components (React)
 - [ ] **Phase 7**: Testing & documentation
 - [ ] **Phase 8**: npm publishing
 
 ## Contributing
 
-This SDK is under active development. Current focus is on Phase 3 (UAManager).
+This SDK is under active development. Current focus is on Phase 7 (Testing & documentation).
 
 ## License
 
