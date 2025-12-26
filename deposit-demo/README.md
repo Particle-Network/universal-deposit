@@ -7,45 +7,48 @@ A Next.js demo application showcasing the Particle Network Deposit SDK with Priv
 This demo demonstrates a complete deposit flow:
 
 1. **User Authentication** — Login with Privy (email, wallet, or social)
-2. **Intermediary Wallet Creation** — Automatically creates a JWT-based intermediary wallet via Particle Auth Core
-3. **Universal Account Setup** — Initializes a Universal Account linked to the intermediary wallet
-4. **Deposit Address Display** — Shows the EVM/Solana deposit addresses where users can send funds
-5. **Automatic Deposit Detection** — Monitors the Universal Account for incoming deposits
-6. **Auto-Sweep to EOA** — Automatically sweeps detected deposits to the user's connected wallet on Arbitrum
+2. **Automatic SDK Initialization** — The SDK handles JWT fetching and Auth Core connection internally
+3. **Deposit Address Display** — Shows the EVM/Solana deposit addresses where users can send funds
+4. **Automatic Deposit Detection** — Monitors the Universal Account for incoming deposits
+5. **Auto-Sweep to EOA** — Automatically sweeps detected deposits to the user's connected wallet on Arbitrum
 
 ## How It Works
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Privy Login    │     │  Particle Auth  │     │  Universal      │
-│  (User's EOA)   │ ──▶ │  Core (JWT)     │ ──▶ │  Account        │
+│  Privy Login    │     │  Deposit SDK    │     │  Universal      │
+│  (User's EOA)   │ ──▶ │  (handles JWT)  │ ──▶ │  Account        │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
         │                       │                        │
-        │ destination           │ signs sweeps           │ deposit addresses
+        │ destination           │ auto-sweep             │ deposit addresses
         ▼                       ▼                        ▼
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
 │  Receives swept │     │  Intermediary   │     │  EVM + Solana   │
-│  funds (Arb)    │     │  Wallet         │     │  Smart Accounts │
+│  funds (Arb)    │     │  Wallet (JWT)   │     │  Smart Accounts │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
-### Authentication Flow
+### Simplified Integration
 
-1. User logs in with Privy → gets `connectkitEoa` (user's wallet address)
-2. Demo fetches JWT from Cloudflare Worker using the user's address as userId
-3. Particle Auth Core connects with the JWT → gets `jwtEoa` (intermediary address) and `authCoreProvider`
-4. Deposit SDK initializes with both addresses:
-   - `ownerAddress`: User's Privy wallet (sweep destination)
-   - `intermediaryAddress`: JWT wallet (UA owner, signs transactions)
-   - `authCoreProvider`: Signs sweep transactions
+The SDK now handles all the complexity internally. You just need to:
 
-### Deposit Detection & Sweep
+1. Wrap your app with `DepositProvider`
+2. Use the `useDeposit` hook with the user's wallet address
+3. Render the `DepositModal` component
 
-1. `BalanceWatcher` polls the Universal Account for balance changes every 8 seconds
-2. When a deposit is detected (>$0.50 USD), it emits a `deposit:detected` event
-3. `Sweeper` builds a transfer transaction to move funds to Arbitrum
-4. `authCoreProvider.signMessage()` signs the transaction with the intermediary wallet
-5. Funds are swept to the user's connected wallet on Arbitrum
+```tsx
+// That's all you need!
+const { isReady, isConnecting } = useDeposit({
+  ownerAddress: authenticated ? walletAddress : undefined,
+});
+```
+
+The SDK automatically:
+- Fetches a JWT from the hosted worker
+- Connects to Particle Auth Core
+- Initializes the Universal Account
+- Starts watching for deposits
+- Auto-sweeps to the user's wallet on Arbitrum
 
 ## Getting Started
 
@@ -72,8 +75,7 @@ Open [http://localhost:3000](http://localhost:3000) to see the demo.
 
 The demo uses baked-in credentials for:
 - **Privy**: App ID configured in `providers.tsx`
-- **Particle Auth Core**: Project credentials configured in `providers.tsx`
-- **JWT Worker**: `https://deposit-auth-worker.deposit-kit.workers.dev/v1/jwt`
+- **Deposit SDK**: Particle credentials and JWT worker URL bundled in SDK
 
 ## Project Structure
 
@@ -81,8 +83,8 @@ The demo uses baked-in credentials for:
 deposit-demo/
 ├── app/
 │   ├── components/
-│   │   └── DepositDemo.tsx    # Main demo component with auth flow
-│   ├── providers.tsx          # Privy + Particle Auth Core providers
+│   │   └── DepositDemo.tsx    # Main demo component (simplified!)
+│   ├── providers.tsx          # Privy + DepositProvider
 │   ├── layout.tsx             # Root layout with providers
 │   ├── page.tsx               # Home page
 │   └── globals.css            # Tailwind styles
@@ -95,17 +97,30 @@ deposit-demo/
 
 ### `DepositDemo.tsx`
 
-The main component that orchestrates:
-- Privy login/logout
-- JWT fetching and Particle Auth Core connection
-- DepositClient initialization with `intermediaryAddress` and `authCoreProvider`
-- DepositWidget/DepositModal rendering
+A simplified demo component that shows the minimal integration:
+
+```tsx
+import { useDeposit, DepositModal } from '@particle-network/deposit-sdk/react';
+
+export function DepositDemo() {
+  const { login, authenticated } = usePrivy();
+  const { wallets } = useWallets();
+  const ownerAddress = wallets[0]?.address;
+
+  // This is all you need! SDK handles JWT + Auth Core internally
+  const { isConnecting, isReady, error, disconnect } = useDeposit({
+    ownerAddress: authenticated ? ownerAddress : undefined,
+  });
+
+  // ... render UI based on state
+}
+```
 
 ### `providers.tsx`
 
 Wraps the app with:
 - `PrivyProvider` for user authentication
-- `AuthCoreContextProvider` for Particle Auth Core (intermediary wallet)
+- `DepositProvider` from the SDK (handles Auth Core internally)
 
 ## Supported Chains
 

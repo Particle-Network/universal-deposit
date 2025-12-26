@@ -15,6 +15,11 @@
       "types": "./dist/react.d.ts",
       "import": "./dist/react.mjs",
       "require": "./dist/react.js"
+    },
+    "./react/auth-core": {
+      "types": "./dist/react/auth-core.d.ts",
+      "import": "./dist/react/auth-core.mjs",
+      "require": "./dist/react/auth-core.js"
     }
   },
   "files": [
@@ -29,8 +34,6 @@
     "test:integration": "vitest run src/__tests__/integration/"
   },
   "peerDependencies": {
-    "@particle-network/auth-core": "^1.5.0",
-    "@particle-network/universal-account-sdk": "^1.0.12",
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
   },
@@ -63,6 +66,10 @@
     "url": "https://github.com/particle-network/deposit-sdk"
   },
   "dependencies": {
+    "@particle-network/auth-core": "^2.1.1",
+    "@particle-network/auth-core-modal": "^1.5.2",
+    "@particle-network/chains": "^1.8.3",
+    "@particle-network/universal-account-sdk": "^1.0.12",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.562.0",

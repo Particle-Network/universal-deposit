@@ -11,6 +11,7 @@ Universal Accounts are smart accounts — they start empty. Users need a way to 
 - **Pre-built UI** — Modal/widget components for easy integration
 - **Headless mode** — Full programmatic control for custom UIs
 - **Multi-chain support** — 17 chains including Ethereum, Arbitrum, Base, Solana, and more
+- **Wallet-agnostic** — Works with any wallet provider (Privy, RainbowKit, etc.)
 
 ## Architecture
 
@@ -30,13 +31,11 @@ Universal Accounts are smart accounts — they start empty. Users need a way to 
 
 ### Key Concepts
 
-1. **Intermediary Wallet**: A JWT-based embedded wallet (via Particle Auth Core) that owns the Universal Account. The consumer app connects to Auth Core and provides the address and provider to the SDK.
+1. **Intermediary Wallet**: A JWT-based embedded wallet (via Particle Auth Core) that owns the Universal Account. The SDK handles Auth Core connection internally.
 
 2. **Universal Account**: The smart account that provides deposit addresses and chain abstraction features. Created using the intermediary wallet's address.
 
-3. **Auth Core Provider**: The signing provider from `@particle-network/auth-core-modal` that signs sweep transactions. Must be connected via JWT before initializing the SDK.
-
-4. **Sweep Flow**: Deposits are detected via balance polling, then automatically swept to the user's connected wallet on Arbitrum.
+3. **Auto-sweep**: Deposits are detected via balance polling, then automatically swept to the user's connected wallet on Arbitrum.
 
 ## Installation
 
@@ -44,48 +43,87 @@ Universal Accounts are smart accounts — they start empty. Users need a way to 
 npm install @particle-network/deposit-sdk
 ```
 
-## Usage
+## Quick Start (React)
 
-### With Privy + Particle Auth Core (Recommended)
+The simplest way to integrate the Deposit SDK is using the React provider and hook. **The SDK handles all the complexity internally** — JWT fetching, Auth Core connection, and client initialization.
 
-This is the recommended integration pattern using Privy for user authentication and Particle Auth Core for the intermediary wallet.
+```tsx
+import { DepositProvider, useDeposit, DepositModal } from '@particle-network/deposit-sdk/react';
+
+// 1. Wrap your app with DepositProvider
+function App() {
+  return (
+    <DepositProvider>
+      <YourApp />
+    </DepositProvider>
+  );
+}
+
+// 2. Use the hook with just the user's wallet address
+function DepositButton() {
+  const { login, authenticated } = usePrivy(); // or any wallet provider
+  const { wallets } = useWallets();
+  const ownerAddress = wallets[0]?.address;
+
+  const { isReady, isConnecting, error } = useDeposit({
+    ownerAddress: authenticated ? ownerAddress : undefined,
+  });
+
+  const [showModal, setShowModal] = useState(false);
+
+  if (!authenticated) {
+    return <button onClick={login}>Login</button>;
+  }
+
+  if (isConnecting) {
+    return <p>Initializing...</p>;
+  }
+
+  if (!isReady) {
+    return <p>Loading...</p>;
+  }
+
+  return (
+    <>
+      <button onClick={() => setShowModal(true)}>Deposit</button>
+      <DepositModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        theme="dark"
+      />
+    </>
+  );
+}
+```
+
+That's it! The SDK automatically:
+- Fetches a JWT from the hosted worker
+- Connects to Particle Auth Core
+- Initializes the Universal Account
+- Starts watching for deposits
+- Auto-sweeps to the user's wallet on Arbitrum
+
+## Advanced Usage
+
+### Direct DepositClient (Headless)
+
+For custom UIs or non-React environments, use the DepositClient directly:
 
 ```typescript
 import { DepositClient } from '@particle-network/deposit-sdk';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
-import { useConnect, useEthereum } from '@particle-network/auth-core-modal';
-import { AuthType } from '@particle-network/auth-core';
 
-// 1. Get user's wallet from Privy
-const { wallets } = useWallets();
-const userWallet = wallets[0];
-
-// 2. Connect to Particle Auth Core with JWT
-const { connect: jwtConnect, connected: particleConnected } = useConnect();
-const { address: intermediaryAddress, provider: authCoreProvider } = useEthereum();
-
-// Fetch JWT and connect (do this after Privy login)
-const jwt = await fetchJwtFromWorker(userWallet.address);
-await jwtConnect({
-  provider: AuthType.jwt,
-  thirdpartyCode: jwt,
-});
-
-// 3. Create DepositClient with both addresses
 const client = new DepositClient({
-  ownerAddress: userWallet.address,           // User's Privy wallet (sweep destination)
-  intermediaryAddress: intermediaryAddress,    // JWT wallet from useEthereum()
+  ownerAddress: '0x...',           // User's wallet (sweep destination)
+  intermediaryAddress: '0x...',    // JWT wallet address
   authCoreProvider: {
-    signMessage: (msg) => authCoreProvider.signMessage(msg),
+    signMessage: (msg) => provider.signMessage(msg),
   },
   autoSweep: true,
 });
 
-// 4. Initialize and start watching
 await client.initialize();
 client.startWatching();
 
-// 5. Listen for events
 client.on('deposit:detected', (deposit) => {
   console.log('Deposit detected:', deposit.token, deposit.chainId);
 });
@@ -149,11 +187,75 @@ The SDK supports 17 chains:
 
 The SDK includes pre-built React components for easy integration.
 
-### Installation
+### DepositProvider
 
-```bash
-npm install @particle-network/deposit-sdk
-# React components require React 18+
+Wrap your app with `DepositProvider` to enable the SDK. It handles Auth Core initialization internally.
+
+```tsx
+import { DepositProvider } from '@particle-network/deposit-sdk/react';
+
+function App() {
+  return (
+    <DepositProvider config={{ autoSweep: true }}>
+      <YourApp />
+    </DepositProvider>
+  );
+}
+```
+
+**Config Options:**
+- `destination.chainId` — Sweep destination chain (default: Arbitrum 42161)
+- `supportedTokens` — Array of token types to support
+- `supportedChains` — Array of chain IDs to support
+- `autoSweep` — Enable auto-sweep (default: true)
+- `minValueUSD` — Minimum deposit value in USD (default: 0.5)
+- `pollingIntervalMs` — Balance polling interval (default: 8000)
+
+### useDeposit Hook
+
+The main hook for interacting with the SDK. Automatically connects when `ownerAddress` is provided.
+
+```tsx
+import { useDeposit } from '@particle-network/deposit-sdk/react';
+
+function MyComponent() {
+  const {
+    // Connection state
+    isConnecting,
+    isConnected,
+    isReady,
+    error,
+    
+    // Addresses
+    ownerAddress,
+    intermediaryAddress,
+    
+    // Actions
+    connect,
+    disconnect,
+    
+    // Client state
+    client,
+    status,
+    depositAddresses,
+    pendingDeposits,
+    recentActivity,
+    
+    // Client actions
+    startWatching,
+    stopWatching,
+    sweep,
+  } = useDeposit({
+    ownerAddress: '0x...', // Pass user's wallet address to auto-connect
+  });
+
+  return (
+    <div>
+      <p>EVM Deposit Address: {depositAddresses?.evm}</p>
+      <p>Solana Deposit Address: {depositAddresses?.solana}</p>
+    </div>
+  );
+}
 ```
 
 ### DepositWidget
@@ -162,21 +264,16 @@ A complete deposit widget with token/chain selection, address display, QR code, 
 
 ```tsx
 import { DepositWidget } from '@particle-network/deposit-sdk/react';
-import { DepositClient } from '@particle-network/deposit-sdk';
 
+// When used inside DepositProvider, no client prop needed
 function App() {
-  const client = new DepositClient({
-    ownerAddress: '0x...',
-    signer: { signMessage: ... },
-  });
+  return <DepositWidget theme="dark" />;
+}
 
-  return (
-    <DepositWidget 
-      client={client}
-      theme="dark"
-      onClose={() => console.log('closed')}
-    />
-  );
+// Or pass a client directly for headless usage
+function HeadlessApp() {
+  const client = /* your DepositClient */;
+  return <DepositWidget client={client} theme="dark" />;
 }
 ```
 
@@ -190,7 +287,6 @@ import { DepositModal } from '@particle-network/deposit-sdk/react';
 
 function App() {
   const [isOpen, setIsOpen] = useState(false);
-  const client = /* your DepositClient */;
 
   return (
     <>
@@ -198,54 +294,9 @@ function App() {
       <DepositModal
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
-        client={client}
         theme="dark"
       />
     </>
-  );
-}
-```
-
-### useDepositClient Hook
-
-A React hook that manages the DepositClient lifecycle and state.
-
-```tsx
-import { useDepositClient } from '@particle-network/deposit-sdk/react';
-
-function DepositButton() {
-  const {
-    client,
-    status,
-    depositAddresses,
-    pendingDeposits,
-    isInitialized,
-    isWatching,
-    error,
-    initialize,
-    startWatching,
-    stopWatching,
-    sweep,
-  } = useDepositClient({
-    ownerAddress: '0x...',
-    signer: { signMessage: ... },
-    autoInitialize: true,  // Auto-initialize on mount
-    autoWatch: false,      // Don't auto-start watching
-  });
-
-  if (!isInitialized) return <p>Initializing...</p>;
-
-  return (
-    <div>
-      <p>EVM Address: {depositAddresses?.evm}</p>
-      <p>Status: {status}</p>
-      <button onClick={startWatching} disabled={isWatching}>
-        Start Watching
-      </button>
-      <button onClick={stopWatching} disabled={!isWatching}>
-        Stop Watching
-      </button>
-    </div>
   );
 }
 ```
@@ -256,7 +307,6 @@ The components use Tailwind CSS classes. Make sure Tailwind is configured in you
 
 ```tsx
 <DepositWidget
-  client={client}
   className="my-custom-class"
   theme="light" // or "dark"
 />

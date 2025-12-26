@@ -9,11 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@particle-network/auth-core": "^2.1.1",
-    "@particle-network/auth-core-modal": "^1.5.2",
-    "@particle-network/chains": "^1.8.3",
     "@particle-network/deposit-sdk": "file:../sdk",
-    "@particle-network/universal-account-sdk": "^1.0.12",
     "@privy-io/react-auth": "^3.10.0",
     "next": "14.2.21",
     "react": "^18.2.0",

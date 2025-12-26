@@ -12,6 +12,8 @@ export const metadata: Metadata = {
   description: "Demo for the Particle Network Deposit SDK",
 };
 
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: Readonly<{

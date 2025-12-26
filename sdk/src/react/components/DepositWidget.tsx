@@ -7,9 +7,13 @@ import { cn } from "../utils/cn";
 import type { DepositClient } from "../../core/DepositClient";
 import type { DetectedDeposit, SweepResult, TokenType } from "../../core/types";
 import { CHAIN, CHAIN_META } from "../../constants/chains";
+import { useDepositContext } from "../context/DepositContext";
 
 export interface DepositWidgetProps {
-  client: DepositClient;
+  /**
+   * The DepositClient instance. Optional if using within DepositProvider.
+   */
+  client?: DepositClient;
   onClose?: () => void;
   className?: string;
   theme?: "dark" | "light";
@@ -75,12 +79,24 @@ const CHAIN_OPTIONS = [
 
 const TOKEN_OPTIONS: TokenType[] = ["USDC", "USDT", "ETH"];
 
+function useOptionalDepositContext(): { client: DepositClient | null } | null {
+  try {
+    return useDepositContext();
+  } catch {
+    return null;
+  }
+}
+
 export function DepositWidget({
-  client,
+  client: clientProp,
   onClose,
   className,
   theme = "dark",
 }: DepositWidgetProps) {
+  // Try to get client from context if not provided as prop
+  const context = useOptionalDepositContext();
+  const client = clientProp || context?.client || null;
+
   const [selectedToken, setSelectedToken] = useState<TokenType>("USDC");
   const [selectedChain, setSelectedChain] = useState(CHAIN_OPTIONS[0]);
   const [showTokenDropdown, setShowTokenDropdown] = useState(false);
@@ -92,6 +108,8 @@ export function DepositWidget({
 
   // Get deposit address based on selected chain
   useEffect(() => {
+    if (!client) return;
+
     const getAddress = async () => {
       try {
         const addresses = await client.getDepositAddresses();
@@ -109,6 +127,8 @@ export function DepositWidget({
 
   // Listen for deposit events
   useEffect(() => {
+    if (!client) return;
+
     const handleDetected = (deposit: DetectedDeposit) => {
       setActivity((prev) => [
         {

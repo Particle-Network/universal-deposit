@@ -18,6 +18,7 @@ export function DepositModal({
   overlayClassName,
   theme = "dark",
 }: DepositModalProps) {
+  // client is optional - DepositWidget will use context if not provided
   // Handle escape key
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
