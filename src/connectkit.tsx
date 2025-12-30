@@ -1,14 +1,20 @@
-'use client';
+"use client";
 
-import { UniversalAccount } from '@particle-network/universal-account-sdk';
+import { UniversalAccount } from "@particle-network/universal-account-sdk";
 
 // 1. Config Constants
-const projectId = '3e63e8c0-1df6-4efb-a96e-96836accebdc';
-const clientKey = 'cx5kWWPJ0AmG80U6ePLJ3U3EpEknGBYeVlWdF4xv';
-const appId = 'c98e6688-ffea-4a66-8282-f3c7b52c012a';
+const particleConfig = {
+  projectId: "2e1612a2-5757-4026-82b1-e0a7a3a69698",
+  clientKey: "cQRTw7Eqag5yHpa3iKkvwQ8J7qThRy1ZAqfPJwdy",
+  appId: "30c594e4-5615-49c9-89d6-86227f5e423e",
+};
 
-if (!projectId || !clientKey || !appId) {
-  throw new Error('Please configure the Particle project in .env first!');
+if (
+  !particleConfig.projectId ||
+  !particleConfig.clientKey ||
+  !particleConfig.appId
+) {
+  throw new Error("Please configure the Particle project in .env first!");
 }
 
 // 2. Process Polyfill (Required for UniversalAccount SDK in browser)
@@ -18,22 +24,22 @@ declare global {
   }
 }
 
-if (typeof window !== 'undefined' && !window.process) {
+if (typeof window !== "undefined" && !window.process) {
   window.process = { env: {} };
 }
 
 // 3. Exports
 export const particleProjectConfig = {
-  projectId,
-  clientKey,
-  appId,
+  projectId: particleConfig.projectId,
+  clientKey: particleConfig.clientKey,
+  appId: particleConfig.appId,
 };
 
 export const createUniversalAccount = (ownerAddress: string) => {
   return new UniversalAccount({
-    projectId,
-    projectClientKey: clientKey,
-    projectAppUuid: appId,
+    projectId: particleConfig.projectId,
+    projectClientKey: particleConfig.clientKey,
+    projectAppUuid: particleConfig.appId,
     ownerAddress,
     tradeConfig: {
       slippageBps: 100,

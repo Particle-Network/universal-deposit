@@ -23,6 +23,18 @@ module.exports = function override(config, env) {
   config.module.rules = config.module.rules.map((rule) => {
     if (rule.oneOf instanceof Array) {
       rule.oneOf[rule.oneOf.length - 1].exclude = [/\.(js|mjs|jsx|cjs|ts|tsx)$/, /\.html$/, /\.json$/];
+      
+      // Exclude @base-org/account from babel-loader (uses import attributes syntax)
+      rule.oneOf.forEach((loader) => {
+        if (loader.loader && loader.loader.includes('babel-loader')) {
+          loader.exclude = loader.exclude || [];
+          if (Array.isArray(loader.exclude)) {
+            loader.exclude.push(/node_modules\/@base-org/);
+          } else {
+            loader.exclude = [loader.exclude, /node_modules\/@base-org/];
+          }
+        }
+      });
     }
     return rule;
   });

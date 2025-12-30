@@ -1,0 +1,202 @@
+/**
+ * UAManager - Manages Universal Account operations
+ * 
+ * Wraps @particle-network/universal-account-sdk to provide:
+ * - UA initialization from intermediary address
+ * - Deposit address retrieval (EVM + Solana)
+ * - Primary asset queries
+ */
+
+import { UniversalAccount } from '@particle-network/universal-account-sdk';
+import { UniversalAccountError } from '../core/errors';
+import type { DepositAddresses, IntermediarySession } from '../core/types';
+import {
+  DEFAULT_PROJECT_ID,
+  DEFAULT_CLIENT_KEY,
+  DEFAULT_APP_ID,
+} from '../constants';
+
+export interface UAManagerConfig {
+  ownerAddress: string;
+  session: IntermediarySession;
+}
+
+export interface SmartAccountOptions {
+  evmSmartAccount: string;
+  solanaSmartAccount: string;
+}
+
+export interface ChainAggregationItem {
+  token?: {
+    chainId: number;
+    [key: string]: unknown;
+  };
+  chainId?: number;
+  rawAmount: string | number;
+  amountInUSD: string | number;
+}
+
+export interface PrimaryAsset {
+  tokenType: string;
+  chainAggregation: ChainAggregationItem[];
+}
+
+export interface PrimaryAssetsResponse {
+  assets: PrimaryAsset[];
+}
+
+export class UAManager {
+  private ua: UniversalAccount | null = null;
+  private depositAddresses: DepositAddresses | null = null;
+  private config: UAManagerConfig;
+  private initialized = false;
+
+  constructor(config: UAManagerConfig) {
+    this.config = config;
+  }
+
+  /**
+   * Initialize the Universal Account
+   * Must be called before other operations
+   */
+  async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    try {
+      // Create UA instance using the intermediary address (from JWT)
+      // The intermediary address is the "owner" of the UA
+      console.log('[UAManager] Creating UA with intermediary address:', this.config.session.intermediaryAddress);
+      
+      this.ua = new UniversalAccount({
+        projectId: DEFAULT_PROJECT_ID,
+        projectClientKey: DEFAULT_CLIENT_KEY,
+        projectAppUuid: DEFAULT_APP_ID,
+        ownerAddress: this.config.session.intermediaryAddress,
+        tradeConfig: {
+          slippageBps: 100,
+          universalGas: true,
+        },
+      });
+
+      // Fetch smart account addresses
+      const options = await this.getSmartAccountOptions();
+      
+      this.depositAddresses = {
+        evm: options.evmSmartAccount,
+        solana: options.solanaSmartAccount,
+      };
+
+      this.initialized = true;
+
+      console.log('[UAManager] Initialized:', {
+        intermediaryAddress: this.config.session.intermediaryAddress,
+        evmDepositAddress: this.depositAddresses.evm,
+        solanaDepositAddress: this.depositAddresses.solana,
+      });
+    } catch (error) {
+      throw new UniversalAccountError(
+        `Failed to initialize Universal Account: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error
+      );
+    }
+  }
+
+  /**
+   * Get deposit addresses for EVM and Solana
+   */
+  getDepositAddresses(): DepositAddresses {
+    if (!this.depositAddresses) {
+      throw new UniversalAccountError('UAManager not initialized. Call initialize() first.');
+    }
+    return this.depositAddresses;
+  }
+
+  /**
+   * Get the underlying Universal Account instance
+   * For advanced operations
+   */
+  getUniversalAccount(): UniversalAccount {
+    if (!this.ua) {
+      throw new UniversalAccountError('UAManager not initialized. Call initialize() first.');
+    }
+    return this.ua;
+  }
+
+  /**
+   * Get primary assets (balances) from the UA
+   */
+  async getPrimaryAssets(): Promise<PrimaryAssetsResponse> {
+    if (!this.ua) {
+      throw new UniversalAccountError('UAManager not initialized. Call initialize() first.');
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = await (this.ua as any).getPrimaryAssets();
+      return {
+        assets: response?.assets || [],
+      };
+    } catch (error) {
+      throw new UniversalAccountError(
+        `Failed to get primary assets: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error
+      );
+    }
+  }
+
+  /**
+   * Check if the manager is initialized
+   */
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  /**
+   * Get smart account options from the UA SDK
+   */
+  private async getSmartAccountOptions(): Promise<SmartAccountOptions> {
+    if (!this.ua) {
+      throw new UniversalAccountError('UA instance not created');
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const options: any = await this.ua.getSmartAccountOptions();
+
+      const evmAddress = options?.evmSmartAccount ?? options?.smartAccountAddress;
+      const solanaAddress = options?.solanaSmartAccount ?? options?.solanaSmartAccountAddress;
+
+      if (!evmAddress) {
+        throw new UniversalAccountError('Failed to get EVM smart account address');
+      }
+
+      if (!solanaAddress) {
+        throw new UniversalAccountError('Failed to get Solana smart account address');
+      }
+
+      return {
+        evmSmartAccount: evmAddress,
+        solanaSmartAccount: solanaAddress,
+      };
+    } catch (error) {
+      if (error instanceof UniversalAccountError) {
+        throw error;
+      }
+      throw new UniversalAccountError(
+        `Failed to get smart account options: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error
+      );
+    }
+  }
+
+  /**
+   * Cleanup
+   */
+  destroy(): void {
+    this.ua = null;
+    this.depositAddresses = null;
+    this.initialized = false;
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "name": "@particle-network/deposit-sdk",
+  "version": "0.1.0",
+  "description": "Deposit SDK for Universal Accounts - solve the empty smart account problem",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.mjs",
+      "require": "./dist/react.js"
+    },
+    "./react/auth-core": {
+      "types": "./dist/react/auth-core.d.ts",
+      "import": "./dist/react/auth-core.mjs",
+      "require": "./dist/react/auth-core.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run src/__tests__/integration/"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "keywords": [
+    "particle",
+    "universal-accounts",
+    "deposit",
+    "web3",
+    "blockchain"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/particle-network/deposit-sdk"
+  },
+  "dependencies": {
+    "@particle-network/auth-core": "^2.1.1",
+    "@particle-network/auth-core-modal": "^1.5.2",
+    "@particle-network/chains": "^1.8.3",
+    "@particle-network/universal-account-sdk": "^1.0.12",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.562.0",
+    "qrcode.react": "^4.2.0",
+    "tailwind-merge": "^3.4.0"
+  }
+}
