@@ -1,10 +1,10 @@
 # Deposit SDK
 
-> A companion SDK for Universal Accounts that solves the "empty smart account" problem by providing deposit flows and auto-sweep functionality.
+> A cross-chain deposit solution that leverages Universal Accounts to provide multi-chain deposit addresses with automatic sweep functionality.
 
 ## Overview
 
-Universal Accounts are smart accounts — they start empty. Users need a way to fund them before they can use chain abstraction features. The Deposit SDK provides:
+The Deposit SDK uses Universal Accounts to enable seamless cross-chain deposits. By creating a Universal Account (via an intermediary JWT wallet), the SDK provides deposit addresses across 17 chains. When users deposit funds to these addresses, the SDK automatically detects and sweeps them to the user's connected wallet. The SDK provides:
 
 - **Deposit addresses** — EVM + Solana smart account addresses for receiving funds
 - **Auto-sweep** — Automatically move deposited funds to a configurable destination
@@ -31,11 +31,13 @@ Universal Accounts are smart accounts — they start empty. Users need a way to 
 
 ### Key Concepts
 
-1. **Intermediary Wallet**: A JWT-based embedded wallet (via Particle Auth Core) that owns the Universal Account. The SDK handles Auth Core connection internally.
+1. **Universal Account**: A smart account that provides deposit addresses across multiple chains (EVM + Solana). Created using an intermediary wallet's address.
 
-2. **Universal Account**: The smart account that provides deposit addresses and chain abstraction features. Created using the intermediary wallet's address.
+2. **Intermediary Wallet**: A JWT-based embedded wallet (via Particle Auth Core) that owns the Universal Account. The SDK handles Auth Core connection internally.
 
-3. **Auto-sweep**: Deposits are detected via balance polling, then automatically swept to the user's connected wallet on Arbitrum.
+3. **Cross-chain deposits**: Users can deposit funds on any of the 17 supported chains to their Universal Account addresses.
+
+4. **Auto-sweep**: Deposits are detected via balance polling, then automatically swept to the user's connected wallet on their preferred chain (default: Arbitrum).
 
 ## Installation
 
