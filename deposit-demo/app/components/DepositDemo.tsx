@@ -21,12 +21,18 @@ export function DepositDemo() {
   const [showModal, setShowModal] = useState(false);
 
   // Use Privy's embedded wallet, not external wallets like MetaMask
+  // For new users, this will be undefined until Privy creates the wallet
   const embeddedWallet = getEmbeddedConnectedWallet(wallets);
   const ownerAddress = embeddedWallet?.address;
 
-  // This is all you need! The SDK handles JWT + Auth Core internally
+  // Track wallet readiness - new users need wallet creation after login
+  const isWalletReady = authenticated && !!ownerAddress;
+  const isWalletPending = authenticated && !ownerAddress;
+
+  // Only pass ownerAddress when wallet is actually ready
+  // This prevents SDK initialization before Privy finishes wallet creation
   const { isConnecting, isReady, error, disconnect } = useDeposit({
-    ownerAddress: authenticated ? ownerAddress : undefined,
+    ownerAddress: isWalletReady ? ownerAddress : undefined,
   });
 
   const handleDisconnect = async () => {
@@ -92,8 +98,16 @@ export function DepositDemo() {
           </div>
         )}
 
+        {/* Wallet Creation State - for new users */}
+        {isWalletPending && (
+          <div className="mb-6 p-4 bg-yellow-900/30 border border-yellow-500/30 rounded-lg flex items-center gap-3">
+            <div className="animate-spin w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full" />
+            <p className="text-yellow-400">Creating your wallet...</p>
+          </div>
+        )}
+
         {/* Connecting State */}
-        {authenticated && isConnecting && (
+        {isWalletReady && isConnecting && (
           <div className="mb-6 p-4 bg-blue-900/30 border border-blue-500/30 rounded-lg flex items-center gap-3">
             <div className="animate-spin w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full" />
             <p className="text-blue-400">Initializing Deposit SDK...</p>
