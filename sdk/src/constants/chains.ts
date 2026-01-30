@@ -64,6 +64,91 @@ export const DEFAULT_SUPPORTED_CHAINS = [
   CHAIN.SOLANA,
 ];
 
+/**
+ * Get the human-readable name for a chain ID
+ * @param chainId - The chain ID to look up
+ * @returns The chain name, or "Unknown Chain" if not found
+ * @example
+ * getChainName(42161) // "Arbitrum"
+ * getChainName(8453)  // "Base"
+ */
+export function getChainName(chainId: number): string {
+  return CHAIN_META[chainId]?.name ?? `Unknown Chain (${chainId})`;
+}
+
+/**
+ * Check if a chain ID is a valid destination for sweeps
+ * @param chainId - The chain ID to validate
+ * @returns true if the chain is supported as a destination
+ */
+export function isValidDestinationChain(chainId: number): boolean {
+  return chainId in CHAIN_META;
+}
+
+/**
+ * Get the address type (evm or solana) for a chain
+ * @param chainId - The chain ID to check
+ * @returns 'evm' | 'solana' | null if chain not found
+ */
+export function getAddressType(chainId: number): 'evm' | 'solana' | null {
+  return CHAIN_META[chainId]?.addressType ?? null;
+}
+
+/**
+ * Validate an EVM address format (0x + 40 hex characters)
+ *
+ * Note: Checksum validation (EIP-55) is not performed to keep dependencies minimal.
+ * The address format is validated but mixed-case addresses are accepted without
+ * verifying the checksum encoding.
+ *
+ * @param address - The address to validate
+ * @returns true if valid EVM address format
+ */
+export function isValidEvmAddress(address: string): boolean {
+  return /^0x[a-fA-F0-9]{40}$/.test(address);
+}
+
+/**
+ * Validate a Solana address format (base58, 32-44 characters)
+ * @param address - The address to validate
+ * @returns true if valid Solana address format
+ */
+export function isValidSolanaAddress(address: string): boolean {
+  // Solana addresses are base58 encoded, typically 32-44 characters
+  // Base58 alphabet (no 0, O, I, l)
+  const base58Regex = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+  return base58Regex.test(address);
+}
+
+/**
+ * Validate an address for a specific chain
+ * @param address - The address to validate
+ * @param chainId - The chain ID to validate against
+ * @returns Object with isValid boolean and optional error message
+ */
+export function validateAddressForChain(
+  address: string,
+  chainId: number
+): { isValid: boolean; error?: string } {
+  const addressType = getAddressType(chainId);
+
+  if (!addressType) {
+    return { isValid: false, error: `Unknown chain ID: ${chainId}` };
+  }
+
+  if (addressType === 'solana') {
+    if (!isValidSolanaAddress(address)) {
+      return { isValid: false, error: 'Invalid Solana address format' };
+    }
+  } else {
+    if (!isValidEvmAddress(address)) {
+      return { isValid: false, error: 'Invalid EVM address format' };
+    }
+  }
+
+  return { isValid: true };
+}
+
 export const PRIMARY_ASSETS_BY_CHAIN: Record<number, string[]> = {
   [CHAIN.SOLANA]: ['USDC', 'USDT', 'SOL'],
   [CHAIN.ETHEREUM]: ['USDC', 'USDT', 'ETH', 'BTC'],

@@ -10,6 +10,8 @@ export {
 // Components
 export { DepositWidget, type DepositWidgetProps } from './components/DepositWidget';
 export { DepositModal, type DepositModalProps } from './components/DepositModal';
+export { RecoveryWidget, type RecoveryWidgetProps } from './components/RecoveryWidget';
+export { RecoveryModal, type RecoveryModalProps } from './components/RecoveryModal';
 
 // Hooks
 export { useDeposit, type UseDepositOptions, type UseDepositReturn } from './hooks/useDeposit';

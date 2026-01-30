@@ -12,6 +12,7 @@ The Deposit SDK uses Universal Accounts to enable seamless cross-chain deposits.
 - **Headless mode** — Full programmatic control for custom UIs
 - **Multi-chain support** — 17 chains including Ethereum, Arbitrum, Base, Solana, and more
 - **Wallet-agnostic** — Works with any wallet provider (Privy, RainbowKit, etc.)
+- **Fund recovery** — Manual recovery of stuck funds when auto-sweep fails
 
 ## Architecture
 
@@ -114,7 +115,7 @@ That's it! The SDK automatically:
 For custom UIs or non-React environments, use the DepositClient directly:
 
 ```typescript
-import { DepositClient } from '@particle-network/deposit-sdk';
+import { DepositClient, CHAIN } from '@particle-network/deposit-sdk';
 
 const client = new DepositClient({
   ownerAddress: '0x...',           // User's wallet (sweep destination)
@@ -135,11 +136,20 @@ client.on('deposit:detected', (deposit) => {
 client.on('deposit:complete', (result) => {
   console.log('Swept successfully:', result.explorerUrl);
 });
+
+// Manual fund recovery
+const stuckFunds = await client.getStuckFunds();
+const results = await client.recoverAllFunds();
+
+// Runtime destination change
+client.setDestination({ chainId: CHAIN.BASE });
 ```
 
 ### Configuration Options
 
 ```typescript
+import { DepositClient, CHAIN } from '@particle-network/deposit-sdk';
+
 const client = new DepositClient({
   // Required
   ownerAddress: '0x...',           // User's wallet (sweep destination)
@@ -162,6 +172,77 @@ const client = new DepositClient({
   pollingIntervalMs: 8000,                  // Default: 8000
 });
 ```
+
+### Destination Configuration
+
+Configure where swept funds are sent. By default, funds are swept to the user's EOA on Arbitrum.
+
+```typescript
+import { DepositClient, CHAIN } from '@particle-network/deposit-sdk';
+
+// Default: sweep to user's EOA on Arbitrum
+const client = new DepositClient({
+  ownerAddress: '0xUserWallet...',
+  intermediaryAddress: '0x...',
+  authCoreProvider: provider,
+});
+
+// Custom chain: sweep to user's EOA on Base
+const client = new DepositClient({
+  ownerAddress: '0xUserWallet...',
+  intermediaryAddress: '0x...',
+  authCoreProvider: provider,
+  destination: { chainId: CHAIN.BASE },
+});
+
+// Custom address: sweep to treasury on Arbitrum
+const client = new DepositClient({
+  ownerAddress: '0xUserWallet...',
+  intermediaryAddress: '0x...',
+  authCoreProvider: provider,
+  destination: { address: '0xTreasury...' },
+});
+
+// Both custom: sweep to treasury on Ethereum mainnet
+const client = new DepositClient({
+  ownerAddress: '0xUserWallet...',
+  intermediaryAddress: '0x...',
+  authCoreProvider: provider,
+  destination: {
+    chainId: CHAIN.ETHEREUM,
+    address: '0xTreasury...',
+  },
+});
+```
+
+**Runtime Updates:**
+
+You can change the destination at any time after initialization:
+
+```typescript
+// Change to a different chain
+client.setDestination({ chainId: CHAIN.POLYGON });
+
+// Change to a different address
+client.setDestination({ address: '0xNewTreasury...' });
+
+// Change both
+client.setDestination({
+  chainId: CHAIN.BASE,
+  address: '0xNewTreasury...',
+});
+
+// Check current destination
+const dest = client.getDestination();
+console.log(`Sweeping to ${dest.address} on chain ${dest.chainId}`);
+```
+
+**Validation:**
+
+- Chain ID must be a supported chain (see `CHAIN` constant)
+- EVM addresses must be valid format (0x + 40 hex chars)
+- Solana addresses must be valid base58 format (32-44 chars)
+- A warning is logged if destination address differs from owner address
 
 ### Supported Chains
 
@@ -249,6 +330,12 @@ function MyComponent() {
     startWatching,
     stopWatching,
     sweep,
+
+    // Recovery
+    stuckFunds,
+    isRecovering,
+    getStuckFunds,
+    recoverFunds,
   } = useDeposit({
     ownerAddress: '0x...', // Pass user's wallet address to auto-connect
   });
@@ -436,6 +523,8 @@ Main entry point for the SDK. Manages lifecycle, configuration, and coordinates 
 - `getDepositAddresses()` - Returns EVM + Solana addresses
 - `startWatching()` / `stopWatching()` - Control balance monitoring
 - `sweep()` - Manual sweep trigger
+- `getStuckFunds()` - Get all non-zero balances (for recovery)
+- `recoverAllFunds()` - Attempt to sweep all stuck funds
 - `destroy()` - Cleanup
 
 **Events:**
@@ -443,6 +532,9 @@ Main entry point for the SDK. Manages lifecycle, configuration, and coordinates 
 - `deposit:processing` - Sweep in progress
 - `deposit:complete` - Sweep successful
 - `deposit:error` - Error occurred
+- `recovery:started` - Recovery process started
+- `recovery:complete` - Recovery finished (with results)
+- `recovery:failed` - Individual recovery failed
 - `status:change` - Client status changed
 
 ### IntermediaryService
@@ -520,6 +612,93 @@ describe('JWT Worker Integration', () => {
 });
 ```
 
+## Fund Recovery
+
+When auto-sweep fails (network issues, gas problems, threshold issues), funds may remain in the Universal Account. The SDK provides manual recovery methods.
+
+### Check for Stuck Funds
+
+```typescript
+// Via DepositClient
+const stuckFunds = await client.getStuckFunds();
+console.log(`Found ${stuckFunds.length} stuck asset(s)`);
+
+for (const fund of stuckFunds) {
+  console.log(`${fund.token} on chain ${fund.chainId}: $${fund.amountUSD}`);
+}
+```
+
+### Recover All Funds
+
+```typescript
+// Attempt to sweep all stuck funds to destination
+const results = await client.recoverAllFunds();
+
+for (const result of results) {
+  if (result.status === 'success') {
+    console.log(`Recovered ${result.token}: ${result.txHash}`);
+  } else {
+    console.log(`Failed ${result.token}: ${result.error}`);
+  }
+}
+```
+
+### React Hook
+
+```tsx
+import { useDepositContext } from '@particle-network/deposit-sdk/react';
+
+function RecoveryPanel() {
+  const { stuckFunds, isRecovering, getStuckFunds, recoverFunds } = useDepositContext();
+
+  return (
+    <div>
+      <button onClick={getStuckFunds}>Check Stuck Funds</button>
+
+      {stuckFunds.length > 0 && (
+        <>
+          <p>Found {stuckFunds.length} stuck asset(s)</p>
+          <button onClick={recoverFunds} disabled={isRecovering}>
+            {isRecovering ? 'Recovering...' : 'Recover All'}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+```
+
+### Recovery Events
+
+```typescript
+client.on('recovery:started', () => {
+  console.log('Recovery started');
+});
+
+client.on('recovery:complete', (results) => {
+  const succeeded = results.filter(r => r.status === 'success').length;
+  console.log(`Recovery complete: ${succeeded}/${results.length} succeeded`);
+});
+
+client.on('recovery:failed', (deposit, error) => {
+  console.log(`Recovery failed for ${deposit.token}: ${error.message}`);
+});
+```
+
+### RecoveryResult Type
+
+```typescript
+interface RecoveryResult {
+  token: TokenType;        // 'ETH' | 'USDC' | etc.
+  chainId: number;         // Source chain ID
+  amount: string;          // Raw amount
+  amountUSD: number;       // USD value
+  status: 'success' | 'failed' | 'skipped';
+  error?: string;          // Error message if failed
+  txHash?: string;         // Transaction hash if success
+}
+```
+
 ## Error Handling
 
 The SDK provides typed error classes:
@@ -581,6 +760,12 @@ client.removeAllListeners();
 - [x] **Phase 6**: UI components (React)
 - [x] **Phase 7**: Testing & documentation
 - [ ] **Phase 8**: npm publishing
+
+## Documentation
+
+- **[SDK Reference](docs/SDK-REFERENCE.md)** — Complete API reference
+- **[Contributing Guide](docs/CONTRIB.md)** — Development workflow
+- **[Runbook](docs/RUNBOOK.md)** — Deployment & operations
 
 ## Contributing
 

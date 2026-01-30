@@ -24,6 +24,10 @@ export type {
   DepositEvents,
   JwtResponse,
   IntermediarySession,
+  // Recovery types
+  RecoveryStatus,
+  RecoveryResult,
+  RecoveryConfig,
 } from './core/types';
 
 // Errors
@@ -50,6 +54,13 @@ export {
   DEFAULT_DESTINATION_CHAIN_ID,
   DEFAULT_MIN_VALUE_USD,
   DEFAULT_POLLING_INTERVAL_MS,
+  // Chain validation utilities
+  getChainName,
+  isValidDestinationChain,
+  getAddressType,
+  isValidEvmAddress,
+  isValidSolanaAddress,
+  validateAddressForChain,
 } from './constants';
 export type { ChainId } from './constants/chains';
 

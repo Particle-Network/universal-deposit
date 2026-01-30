@@ -13,6 +13,8 @@ import type {
   EOABalance,
   ClientStatus,
   IntermediarySession,
+  RecoveryResult,
+  TokenType,
 } from './types';
 import {
   DEFAULT_JWT_SERVICE_URL,
@@ -23,6 +25,11 @@ import {
   DEFAULT_PROJECT_ID,
   DEFAULT_CLIENT_KEY,
   DEFAULT_APP_ID,
+  isValidDestinationChain,
+  getChainName,
+  getAddressType,
+  isValidEvmAddress,
+  isValidSolanaAddress,
 } from '../constants';
 import { DEFAULT_SUPPORTED_TOKENS } from '../constants/tokens';
 import { IntermediaryService } from '../intermediary';
@@ -98,6 +105,12 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       throw new ConfigurationError('intermediaryAddress must be a valid EVM address');
     }
 
+    // Validate destination configuration
+    const destinationChainId = config.destination?.chainId ?? DEFAULT_DESTINATION_CHAIN_ID;
+    const destinationAddress = config.destination?.address?.trim() || config.ownerAddress.trim();
+
+    this.validateDestination(destinationChainId, destinationAddress, config.ownerAddress);
+
     return {
       // JWT service uses baked-in credentials (internal to SDK)
       projectId: DEFAULT_PROJECT_ID,
@@ -122,6 +135,48 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
 
   private isValidAddress(address: string): boolean {
     return /^0x[a-fA-F0-9]{40}$/.test(address);
+  }
+
+  /**
+   * Validate destination chain and address configuration
+   */
+  private validateDestination(chainId: number, address: string, ownerAddress: string): void {
+    // Validate chain is supported
+    if (!isValidDestinationChain(chainId)) {
+      throw new ConfigurationError(
+        `Invalid destination chain ID: ${chainId}. Use a chain from the CHAIN constant.`
+      );
+    }
+
+    // Get address type for the destination chain
+    const addressType = getAddressType(chainId);
+
+    // Validate address format based on chain type
+    if (addressType === 'solana') {
+      if (!isValidSolanaAddress(address)) {
+        throw new ConfigurationError(
+          `Invalid Solana address format for destination on ${getChainName(chainId)}: ${address}`
+        );
+      }
+    } else {
+      if (!isValidEvmAddress(address)) {
+        throw new ConfigurationError(
+          `Invalid EVM address format for destination on ${getChainName(chainId)}: ${address}`
+        );
+      }
+    }
+
+    // Log warning if destination address differs from owner
+    if (address.toLowerCase() !== ownerAddress.toLowerCase()) {
+      console.warn(
+        `[DepositSDK] ⚠️ Destination address (${address}) differs from owner address (${ownerAddress}). ` +
+        `Funds will be sent to the custom destination address on ${getChainName(chainId)}.`
+      );
+    }
+
+    console.log(
+      `[DepositSDK] Destination configured: ${getChainName(chainId)} (${chainId}) → ${address}`
+    );
   }
 
   // ============================================
@@ -334,6 +389,140 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
   }
 
   // ============================================
+  // Fund Recovery
+  // ============================================
+
+  /**
+   * Get all funds currently in the Universal Account that could be recovered.
+   * This is useful for displaying what's stuck and available for manual recovery.
+   *
+   * Unlike checkBalances(), this method has no minimum USD threshold -
+   * it returns ALL non-zero balances regardless of value.
+   */
+  async getStuckFunds(): Promise<DetectedDeposit[]> {
+    if (!this.uaManager) {
+      throw new ConfigurationError('Client not initialized. Call initialize() first.');
+    }
+
+    const primaryAssets = await this.uaManager.getPrimaryAssets();
+    const deposits: DetectedDeposit[] = [];
+
+    for (const asset of primaryAssets.assets) {
+      const tokenType = this.normalizeTokenType(asset.tokenType);
+      if (!tokenType) continue;
+
+      const chainAgg = asset.chainAggregation || [];
+      for (const chain of chainAgg) {
+        const chainId = Number(chain.token?.chainId || chain.chainId);
+        if (!chainId) continue;
+
+        const rawAmount = this.parseBigInt(chain.rawAmount);
+        const valueUSD = Number(chain.amountInUSD || 0);
+
+        // Include ANY non-zero balance (no minimum threshold)
+        if (rawAmount > 0n) {
+          deposits.push({
+            id: `recovery:${tokenType}:${chainId}:${Date.now()}`,
+            token: tokenType.toUpperCase() as TokenType,
+            chainId,
+            amount: rawAmount.toString(),
+            amountUSD: valueUSD,
+            rawAmount,
+            detectedAt: Date.now(),
+          });
+        }
+      }
+    }
+
+    console.log(`[DepositSDK] Found ${deposits.length} stuck fund(s):`,
+      deposits.map(d => `${d.token} on chain ${d.chainId}: $${d.amountUSD.toFixed(2)}`));
+
+    return deposits;
+  }
+
+  /**
+   * Attempt to recover all funds currently in the Universal Account.
+   * This will sweep every non-zero balance to the configured destination.
+   *
+   * Use this for manual recovery when auto-sweep has failed or when
+   * funds are stuck due to configuration issues.
+   *
+   * @returns Array of recovery results for each attempted sweep
+   */
+  async recoverAllFunds(): Promise<RecoveryResult[]> {
+    if (!this.sweeper) {
+      throw new ConfigurationError('Client not initialized. Call initialize() first.');
+    }
+
+    console.log('[DepositSDK] Starting fund recovery...');
+    this.emit('recovery:started');
+
+    const stuckFunds = await this.getStuckFunds();
+    const results: RecoveryResult[] = [];
+
+    if (stuckFunds.length === 0) {
+      console.log('[DepositSDK] No funds to recover');
+      this.emit('recovery:complete', results);
+      return results;
+    }
+
+    const previousStatus = this.status;
+    this.setStatus('sweeping');
+
+    for (const deposit of stuckFunds) {
+      try {
+        console.log(`[DepositSDK] Recovering ${deposit.token} on chain ${deposit.chainId}...`);
+
+        const sweepResult = await this.sweeper.sweep(deposit);
+
+        results.push({
+          token: deposit.token,
+          chainId: deposit.chainId,
+          amount: deposit.amount,
+          amountUSD: deposit.amountUSD,
+          status: sweepResult.status === 'success' ? 'success' : 'failed',
+          txHash: sweepResult.transactionId || undefined,
+          error: sweepResult.error,
+        });
+
+        // Clear from balance watcher's processing keys if sweep succeeded
+        if (sweepResult.status === 'success' && this.balanceWatcher) {
+          const key = `${deposit.token.toLowerCase()}:${deposit.chainId}`;
+          this.balanceWatcher.clearProcessingKey(key);
+        }
+
+        console.log(`[DepositSDK] Recovery ${sweepResult.status}: ${deposit.token} on chain ${deposit.chainId}`);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`[DepositSDK] Recovery failed for ${deposit.token} on chain ${deposit.chainId}:`, error);
+
+        results.push({
+          token: deposit.token,
+          chainId: deposit.chainId,
+          amount: deposit.amount,
+          amountUSD: deposit.amountUSD,
+          status: 'failed',
+          error: errorMessage,
+        });
+
+        this.emit('recovery:failed', deposit, error instanceof Error ? error : new Error(errorMessage));
+      }
+    }
+
+    // Restore previous status
+    if (this.balanceWatcher?.isActive()) {
+      this.setStatus('watching');
+    } else {
+      this.setStatus(previousStatus === 'sweeping' ? 'ready' : previousStatus);
+    }
+
+    console.log(`[DepositSDK] Recovery complete. ${results.filter(r => r.status === 'success').length}/${results.length} succeeded.`);
+    this.emit('recovery:complete', results);
+
+    return results;
+  }
+
+  // ============================================
   // State Accessors
   // ============================================
 
@@ -349,6 +538,68 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     return this.config;
   }
 
+  /**
+   * Update the sweep destination at runtime.
+   *
+   * This allows changing where funds are sent after the client is initialized.
+   * The change takes effect immediately for subsequent sweeps.
+   *
+   * @param destination - New destination configuration
+   * @param destination.chainId - Chain ID to sweep to (defaults to current if not specified)
+   * @param destination.address - Address to receive funds (defaults to ownerAddress if not specified)
+   *
+   * @throws ConfigurationError if the chain ID or address is invalid
+   *
+   * @example
+   * // Change destination to Base
+   * client.setDestination({ chainId: CHAIN.BASE });
+   *
+   * @example
+   * // Change destination to a custom address
+   * client.setDestination({ address: '0xTreasury...' });
+   *
+   * @example
+   * // Change both chain and address
+   * client.setDestination({
+   *   chainId: CHAIN.ETHEREUM,
+   *   address: '0xTreasury...'
+   * });
+   */
+  setDestination(destination: { chainId?: number; address?: string }): void {
+    const newChainId = destination.chainId ?? this.config.destination.chainId;
+    const newAddress = destination.address?.trim() || this.config.destination.address;
+
+    // Validate the new destination
+    this.validateDestination(newChainId, newAddress, this.config.ownerAddress);
+
+    // Update config
+    this.config = {
+      ...this.config,
+      destination: {
+        chainId: newChainId,
+        address: newAddress.toLowerCase(),
+      },
+    };
+
+    // Update Sweeper if initialized
+    if (this.sweeper) {
+      this.sweeper = new Sweeper({
+        uaManager: this.uaManager!,
+        authCoreProvider: this.config.authCoreProvider,
+        destination: this.config.destination,
+      });
+    }
+
+    console.log(`[DepositSDK] Destination updated: ${getChainName(newChainId)} → ${newAddress}`);
+  }
+
+  /**
+   * Get the current destination configuration
+   */
+  getDestination(): Readonly<{ address: string; chainId: number }> {
+    return this.config.destination;
+  }
+
   // ============================================
   // Internal Helpers
   // ============================================
@@ -357,6 +608,32 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     if (this.status !== status) {
       this.status = status;
       this.emit('status:change', status);
+    }
+  }
+
+  /**
+   * Normalize token type string to lowercase
+   */
+  private normalizeTokenType(tokenType: string | undefined): string | null {
+    if (!tokenType) return null;
+    const normalized = tokenType.toLowerCase();
+    if (['eth', 'usdc', 'usdt', 'btc', 'sol', 'bnb'].includes(normalized)) {
+      return normalized;
+    }
+    return null;
+  }
+
+  /**
+   * Parse a value to BigInt safely
+   */
+  private parseBigInt(value: string | number | bigint | undefined): bigint {
+    if (value === undefined || value === null) return 0n;
+    try {
+      if (typeof value === 'bigint') return value;
+      if (typeof value === 'number') return BigInt(Math.floor(value));
+      return BigInt(value);
+    } catch {
+      return 0n;
     }
   }
 

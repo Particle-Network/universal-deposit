@@ -26,8 +26,52 @@ export interface AuthCoreProvider {
   signMessage: (message: string) => Promise<string>;
 }
 
+/**
+ * Configuration for the sweep destination (where funds are sent after deposit)
+ *
+ * @example
+ * // Default: sweep to owner's EOA on Arbitrum
+ * destination: undefined
+ *
+ * @example
+ * // Sweep to owner's EOA on Base
+ * destination: { chainId: CHAIN.BASE }
+ *
+ * @example
+ * // Sweep to a custom treasury address on Arbitrum
+ * destination: { address: '0xTreasury...' }
+ *
+ * @example
+ * // Sweep to a custom address on Ethereum mainnet
+ * destination: {
+ *   chainId: CHAIN.ETHEREUM,
+ *   address: '0xTreasury...'
+ * }
+ */
 export interface DestinationConfig {
+  /**
+   * The address to receive swept funds.
+   *
+   * - If not specified, defaults to the user's connected EOA (ownerAddress)
+   * - For EVM chains: must be a valid 0x-prefixed address (42 characters)
+   * - For Solana: must be a valid base58 address (32-44 characters)
+   *
+   * ⚠️ Warning: If set to a different address than ownerAddress, ensure the
+   * recipient has access to this address. Funds sent to an inaccessible
+   * address cannot be recovered.
+   */
   address?: string;
+
+  /**
+   * The chain ID to sweep funds to.
+   *
+   * - If not specified, defaults to Arbitrum (42161)
+   * - Must be a supported chain from the CHAIN constant
+   * - The chain's address type (EVM/Solana) must match the address format
+   *
+   * @see CHAIN constant for available chain IDs
+   * @default 42161 (Arbitrum)
+   */
   chainId?: number;
 }
 
@@ -49,7 +93,13 @@ export interface DepositClientConfig {
   // Legacy signer (deprecated - use authCoreProvider instead)
   signer?: Signer;
 
-  // Destination configuration
+  /**
+   * Configuration for where swept funds are sent.
+   *
+   * Defaults to sweeping to the owner's EOA on Arbitrum if not specified.
+   *
+   * @see DestinationConfig for full documentation and examples
+   */
   destination?: DestinationConfig;
 
   // Token filtering
@@ -60,6 +110,9 @@ export interface DepositClientConfig {
   autoSweep?: boolean;
   minValueUSD?: number;
   pollingIntervalMs?: number;
+
+  // Recovery options
+  recovery?: RecoveryConfig;
 
   // Advanced options (internal use)
   jwtServiceUrl?: string;
@@ -103,6 +156,35 @@ export interface SweepResult {
 }
 
 // ============================================
+// Recovery Types
+// ============================================
+
+export type RecoveryStatus = 'success' | 'failed' | 'skipped';
+
+export interface RecoveryResult {
+  token: TokenType;
+  chainId: number;
+  amount: string;
+  amountUSD: number;
+  status: RecoveryStatus;
+  error?: string;
+  txHash?: string;
+}
+
+export interface RecoveryConfig {
+  /** Enable automatic retry of failed sweeps. Default: true */
+  autoRetry?: boolean;
+  /** Maximum number of retry attempts. Default: 3 */
+  maxRetries?: number;
+  /** Initial delay between retries in ms. Default: 60000 (1 minute) */
+  retryDelayMs?: number;
+  /** Backoff multiplier for subsequent retries. Default: 2 */
+  backoffMultiplier?: number;
+  /** Callback when recovery ultimately fails after all retries */
+  onRecoveryFailed?: (deposit: DetectedDeposit, error: Error) => void;
+}
+
+// ============================================
 // EOA Balances
 // ============================================
 
@@ -136,6 +218,9 @@ export type DepositEvents = {
   'deposit:processing': (deposit: DetectedDeposit) => void;
   'deposit:complete': (result: SweepResult) => void;
   'deposit:error': (error: Error, deposit?: DetectedDeposit) => void;
+  'recovery:started': () => void;
+  'recovery:complete': (results: RecoveryResult[]) => void;
+  'recovery:failed': (deposit: DetectedDeposit, error: Error) => void;
   'eoa:balances': (balances: EOABalance[]) => void;
   'status:change': (status: ClientStatus) => void;
   [key: string]: (...args: any[]) => void;

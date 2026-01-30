@@ -22,6 +22,8 @@ import type {
   SweepResult,
   ClientStatus,
   TokenType,
+  RecoveryResult,
+  DestinationConfig,
 } from "../../core/types";
 import {
   DEFAULT_PROJECT_ID,
@@ -31,10 +33,44 @@ import {
   DEFAULT_JWT_SERVICE_URL,
 } from "../../constants";
 
+/**
+ * Configuration for the DepositProvider
+ *
+ * @example
+ * // Default configuration (sweep to owner's EOA on Arbitrum)
+ * <DepositProvider>
+ *   <App />
+ * </DepositProvider>
+ *
+ * @example
+ * // Sweep to a different chain
+ * <DepositProvider config={{ destination: { chainId: CHAIN.BASE } }}>
+ *   <App />
+ * </DepositProvider>
+ *
+ * @example
+ * // Sweep to a custom treasury address
+ * <DepositProvider config={{ destination: { address: '0xTreasury...' } }}>
+ *   <App />
+ * </DepositProvider>
+ *
+ * @example
+ * // Sweep to a custom address on a specific chain
+ * <DepositProvider config={{
+ *   destination: {
+ *     chainId: CHAIN.ETHEREUM,
+ *     address: '0xTreasury...'
+ *   }
+ * }}>
+ *   <App />
+ * </DepositProvider>
+ */
 export interface DepositConfig {
-  destination?: {
-    chainId?: number;
-  };
+  /**
+   * Destination configuration for where swept funds are sent.
+   * @see DestinationConfig for full documentation
+   */
+  destination?: DestinationConfig;
   supportedTokens?: TokenType[];
   supportedChains?: number[];
   autoSweep?: boolean;
@@ -68,6 +104,14 @@ export interface DepositContextValue {
   startWatching: () => void;
   stopWatching: () => void;
   sweep: (depositId?: string) => Promise<SweepResult[]>;
+  setDestination: (destination: DestinationConfig) => void;
+  currentDestination: { address: string; chainId: number } | null;
+
+  // Recovery actions
+  stuckFunds: DetectedDeposit[];
+  isRecovering: boolean;
+  getStuckFunds: () => Promise<DetectedDeposit[]>;
+  recoverFunds: () => Promise<RecoveryResult[]>;
 }
 
 interface ActivityItem {
@@ -128,6 +172,10 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     useState<DepositAddresses | null>(null);
   const [pendingDeposits, setPendingDeposits] = useState<DetectedDeposit[]>([]);
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
+
+  // Recovery state
+  const [stuckFunds, setStuckFunds] = useState<DetectedDeposit[]>([]);
+  const [isRecovering, setIsRecovering] = useState(false);
 
   // Setup client event listeners
   const setupClientListeners = useCallback((client: DepositClient) => {
@@ -320,8 +368,8 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
               authCoreProvider.signMessage(message),
           },
           destination: {
-            chainId:
-              config.destination?.chainId ?? DEFAULT_DESTINATION_CHAIN_ID,
+            chainId: config.destination?.chainId ?? DEFAULT_DESTINATION_CHAIN_ID,
+            address: config.destination?.address,
           },
           supportedTokens: config.supportedTokens,
           supportedChains: config.supportedChains,
@@ -591,6 +639,46 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     return clientRef.current.sweep(depositId);
   }, []);
 
+  const setDestination = useCallback((destination: DestinationConfig) => {
+    if (!clientRef.current) {
+      throw new Error("Client not initialized");
+    }
+    clientRef.current.setDestination(destination);
+  }, []);
+
+  const getCurrentDestination = useCallback((): { address: string; chainId: number } | null => {
+    if (!clientRef.current) {
+      return null;
+    }
+    return clientRef.current.getDestination();
+  }, []);
+
+  // Recovery methods
+  const getStuckFunds = useCallback(async () => {
+    if (!clientRef.current) {
+      throw new Error("Client not initialized");
+    }
+    const funds = await clientRef.current.getStuckFunds();
+    setStuckFunds(funds);
+    return funds;
+  }, []);
+
+  const recoverFunds = useCallback(async () => {
+    if (!clientRef.current) {
+      throw new Error("Client not initialized");
+    }
+    setIsRecovering(true);
+    try {
+      const results = await clientRef.current.recoverAllFunds();
+      // Refresh stuck funds after recovery
+      const remainingFunds = await clientRef.current.getStuckFunds();
+      setStuckFunds(remainingFunds);
+      return results;
+    } finally {
+      setIsRecovering(false);
+    }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -617,6 +705,13 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     startWatching,
     stopWatching,
     sweep,
+    setDestination,
+    currentDestination: getCurrentDestination(),
+    // Recovery
+    stuckFunds,
+    isRecovering,
+    getStuckFunds,
+    recoverFunds,
   };
 
   return (

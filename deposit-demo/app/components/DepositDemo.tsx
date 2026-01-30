@@ -1,8 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { usePrivy, useWallets, getEmbeddedConnectedWallet } from "@privy-io/react-auth";
-import { useDeposit, DepositModal } from "@particle-network/deposit-sdk/react";
+import {
+  usePrivy,
+  useWallets,
+  getEmbeddedConnectedWallet,
+} from "@privy-io/react-auth";
+import {
+  useDeposit,
+  DepositModal,
+  RecoveryModal,
+} from "@particle-network/deposit-sdk/react";
 
 const WALLET_CREATION_TIMEOUT_MS = 30000;
 
@@ -20,7 +28,8 @@ const WALLET_CREATION_TIMEOUT_MS = 30000;
 export function DepositDemo() {
   const { login, ready, authenticated, logout } = usePrivy();
   const { wallets } = useWallets();
-  const [showModal, setShowModal] = useState(false);
+  const [showDepositModal, setShowDepositModal] = useState(false);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
 
   // Use Privy's embedded wallet, not external wallets like MetaMask
   // For new users, this will be undefined until Privy creates the wallet
@@ -142,9 +151,12 @@ export function DepositDemo() {
           <div className="mb-6 p-4 bg-red-900/30 border border-red-500/30 rounded-lg">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-red-400 font-medium">Wallet creation appears stuck</p>
+                <p className="text-red-400 font-medium">
+                  Wallet creation appears stuck
+                </p>
                 <p className="text-red-400/70 text-sm mt-1">
-                  This is taking longer than expected. Try resetting and logging in again.
+                  This is taking longer than expected. Try resetting and logging
+                  in again.
                 </p>
               </div>
               <button
@@ -177,21 +189,41 @@ export function DepositDemo() {
           <div className="max-w-md mx-auto">
             <div className="bg-zinc-900 rounded-xl p-6 border border-zinc-800">
               <h2 className="text-lg font-semibold text-white mb-4">
-                Deposit Widget
+                SDK Widgets Demo
               </h2>
-              <p className="text-zinc-400 text-sm mb-4">
-                Click the button below to open the deposit widget and get your
-                deposit address.
+              <p className="text-zinc-400 text-sm mb-6">
+                The SDK provides pre-built widgets for deposit and recovery
+                flows. Click the buttons below to try them out.
               </p>
-              <button
-                onClick={() => setShowModal(true)}
-                className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-              >
-                Open Deposit Modal
-              </button>
+
+              {/* Deposit Widget Button */}
+              <div className="mb-4">
+                <button
+                  onClick={() => setShowDepositModal(true)}
+                  className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                >
+                  Open Deposit Modal
+                </button>
+                <p className="text-zinc-500 text-xs mt-2 text-center">
+                  Get deposit addresses and view activity
+                </p>
+              </div>
+
+              {/* Recovery Widget Button */}
+              <div className="mb-6">
+                <button
+                  onClick={() => setShowRecoveryModal(true)}
+                  className="w-full px-6 py-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors font-medium"
+                >
+                  Open Recovery Modal
+                </button>
+                <p className="text-zinc-500 text-xs mt-2 text-center">
+                  Scan and recover stuck funds
+                </p>
+              </div>
 
               {/* Info */}
-              <div className="mt-6 p-4 bg-green-900/20 border border-green-500/30 rounded-lg">
+              <div className="p-4 bg-green-900/20 border border-green-500/30 rounded-lg">
                 <p className="text-green-400 text-sm">
                   ✅ Auto-sweep enabled. Send assets to the deposit address and
                   they will be automatically swept to your wallet on Arbitrum.
@@ -201,13 +233,20 @@ export function DepositDemo() {
           </div>
         )}
 
-        {/* Modal */}
+        {/* Modals */}
         <DepositModal
-          isOpen={showModal}
-          onClose={() => setShowModal(false)}
+          isOpen={showDepositModal}
+          onClose={() => setShowDepositModal(false)}
+          theme="dark"
+        />
+
+        <RecoveryModal
+          isOpen={showRecoveryModal}
+          onClose={() => setShowRecoveryModal(false)}
           theme="dark"
         />
       </div>
     </div>
   );
 }
+
