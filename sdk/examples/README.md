@@ -2,16 +2,43 @@
 
 This directory contains example implementations demonstrating different ways to use the Deposit SDK.
 
+## Architecture Overview
+
+The React SDK has three main pieces:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  DepositProvider                                            │
+│  - Wraps your app                                           │
+│  - Sets up Particle Auth Core context                       │
+│  - Configures default destination (optional)                │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  useDeposit({ ownerAddress })                         │  │
+│  │  - REQUIRED to initialize SDK                         │  │
+│  │  - Pass user's wallet address from your auth provider │  │
+│  │  - Returns: isConnecting, isReady, error, disconnect  │  │
+│  └───────────────────────────────────────────────────────┘  │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  DepositModal / DepositWidget                         │  │
+│  │  - Pre-built UI components                            │  │
+│  │  - Use destination prop to configure sweep target     │  │
+│  │  - Only work after useDeposit initializes SDK         │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Point:** `useDeposit({ ownerAddress })` is **required** to initialize the SDK. The widgets won't work without it.
+
+---
+
 ## Examples
 
 ### 1. `headless-usage.tsx`
 **Headless SDK Usage (No Pre-built UI)**
 
-Use the core SDK without React widgets. You control the entire UI - the SDK handles:
-- JWT authentication with Particle Auth Core
-- Universal Account creation
-- Balance watching for deposits
-- Automatic/manual sweeping
+Use the core SDK without React widgets. You control the entire UI.
 
 **When to use:**
 - Building a custom deposit UI
@@ -45,18 +72,39 @@ Sweep funds to a specific address (e.g., treasury wallet) instead of the user's 
 - Any scenario where funds shouldn't go to the user
 
 ```tsx
-import { DepositModal, CHAIN } from '@particle-network/deposit-sdk/react';
+import {
+  DepositProvider,
+  DepositModal,
+  useDeposit,
+  CHAIN,
+} from '@particle-network/deposit-sdk/react';
 
 const TREASURY = "0x742d35Cc6634C0532925a3b844Bc9e7595f8dE42";
 
-<DepositModal
-  isOpen={showModal}
-  onClose={() => setShowModal(false)}
-  destination={{
-    chainId: CHAIN.BASE,
-    address: TREASURY,  // Custom address
-  }}
-/>
+function App() {
+  const { address } = useYourAuthProvider();
+
+  // REQUIRED: Initialize SDK
+  const { isReady } = useDeposit({ ownerAddress: address });
+
+  if (!isReady) return <Loading />;
+
+  return (
+    <DepositModal
+      isOpen={showModal}
+      onClose={() => setShowModal(false)}
+      destination={{
+        chainId: CHAIN.BASE,
+        address: TREASURY,  // Custom address
+      }}
+    />
+  );
+}
+
+// Wrap at app root
+<DepositProvider>
+  <App />
+</DepositProvider>
 ```
 
 ---
@@ -72,13 +120,40 @@ Let users choose their preferred destination chain while keeping their own walle
 - User-centric UX
 
 ```tsx
-import { DepositWidget, CHAIN } from '@particle-network/deposit-sdk/react';
+import {
+  DepositProvider,
+  DepositModal,
+  useDeposit,
+  CHAIN,
+} from '@particle-network/deposit-sdk/react';
 
-const [chainId, setChainId] = useState(CHAIN.ARBITRUM);
+function App() {
+  const { address } = useYourAuthProvider();
+  const [chainId, setChainId] = useState(CHAIN.ARBITRUM);
 
-<DepositWidget
-  destination={{ chainId }}  // No address = user's EOA
-/>
+  // REQUIRED: Initialize SDK
+  const { isReady } = useDeposit({ ownerAddress: address });
+
+  if (!isReady) return <Loading />;
+
+  return (
+    <>
+      <button onClick={() => setChainId(CHAIN.BASE)}>Base</button>
+      <button onClick={() => setChainId(CHAIN.POLYGON)}>Polygon</button>
+
+      <DepositModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        destination={{ chainId }}  // No address = user's EOA
+      />
+    </>
+  );
+}
+
+// Wrap at app root
+<DepositProvider>
+  <App />
+</DepositProvider>
 ```
 
 ---
@@ -95,24 +170,46 @@ const [chainId, setChainId] = useState(CHAIN.ARBITRUM);
 
 ---
 
-## Configuration Levels
+## Minimal Integration
 
-Destination can be configured at multiple levels (later overrides earlier):
-
-1. **Provider Level** - Default for all widgets
 ```tsx
-<DepositProvider config={{ destination: { chainId: CHAIN.BASE } }}>
-```
+// 1. Wrap app with DepositProvider
+import { DepositProvider } from '@particle-network/deposit-sdk/react';
 
-2. **Widget Props** - Override for specific widget
-```tsx
-<DepositWidget destination={{ chainId: CHAIN.POLYGON }} />
-```
+function Root() {
+  return (
+    <YourAuthProvider>
+      <DepositProvider>
+        <App />
+      </DepositProvider>
+    </YourAuthProvider>
+  );
+}
 
-3. **Runtime** - Change programmatically
-```tsx
-const { setDestination } = useDepositContext();
-setDestination({ chainId: CHAIN.ETHEREUM });
+// 2. Initialize SDK and show widget
+import { useDeposit, DepositModal, CHAIN } from '@particle-network/deposit-sdk/react';
+
+function App() {
+  const { address } = useYourAuth();
+  const [showModal, setShowModal] = useState(false);
+
+  // Initialize SDK (required)
+  const { isReady } = useDeposit({ ownerAddress: address });
+
+  return (
+    <>
+      <button onClick={() => setShowModal(true)} disabled={!isReady}>
+        Deposit
+      </button>
+
+      <DepositModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        destination={{ chainId: CHAIN.BASE }}
+      />
+    </>
+  );
+}
 ```
 
 ---
@@ -121,4 +218,5 @@ setDestination({ chainId: CHAIN.ETHEREUM });
 
 - Auth provider code (Privy, RainbowKit, etc.) is pseudocode in these examples
 - Deposit SDK code is production-ready
+- `useDeposit` must be called to initialize the SDK before widgets work
 - See `CLAUDE.md` in the SDK root for full documentation

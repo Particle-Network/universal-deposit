@@ -9,6 +9,11 @@
  *
  * Use case: Let users receive swept funds on their preferred chain
  * (e.g., Base for lower fees) while still using their own wallet.
+ *
+ * Architecture:
+ * - DepositProvider: Wraps app, provides context
+ * - useDeposit: Initializes SDK when ownerAddress is provided (REQUIRED)
+ * - DepositModal/Widget: UI components with destination prop
  */
 
 import { useState } from "react";
@@ -16,29 +21,29 @@ import {
   DepositProvider,
   DepositModal,
   DepositWidget,
+  useDeposit,
   useDepositContext,
   CHAIN,
 } from "@particle-network/deposit-sdk/react";
 
 // =============================================================================
-// PSEUDOCODE: Your auth provider wrapper
+// PSEUDOCODE: Your auth provider
 // =============================================================================
-// In a real app, wrap your app with your auth provider (Privy, RainbowKit, etc.)
+// In a real app, get ownerAddress from your auth provider (Privy, RainbowKit, etc.)
 //
-// import { PrivyProvider } from "@privy-io/react-auth";
-//
-// function App() {
-//   return (
-//     <PrivyProvider appId="your-app-id">
-//       <DepositProvider>
-//         <YourApp />
-//       </DepositProvider>
-//     </PrivyProvider>
-//   );
-// }
+// import { usePrivy, useWallets, getEmbeddedConnectedWallet } from "@privy-io/react-auth";
+// const { wallets } = useWallets();
+// const embeddedWallet = getEmbeddedConnectedWallet(wallets);
+// const ownerAddress = embeddedWallet?.address;
+
+// For this example, we simulate a connected wallet:
+const useAuth = () => ({
+  ownerAddress: "0x1234567890abcdef1234567890abcdef12345678",
+  isConnected: true,
+});
 
 // =============================================================================
-// EXAMPLE: Widget with Chain Selection (User's EOA)
+// CONSTANTS
 // =============================================================================
 
 // Available chains for the user to choose from
@@ -50,24 +55,63 @@ const AVAILABLE_CHAINS = [
   { id: CHAIN.OPTIMISM, name: "Optimism", description: "Optimistic rollup" },
 ];
 
+// =============================================================================
+// INNER COMPONENT: Uses the SDK after initialization
+// =============================================================================
+
 function DepositPageContent() {
   const [showModal, setShowModal] = useState(false);
   const [selectedChainId, setSelectedChainId] = useState<number>(CHAIN.ARBITRUM);
 
-  // Access context to show current destination
-  const { currentDestination, setDestination } = useDepositContext();
+  // Get owner address from your auth provider
+  const { ownerAddress, isConnected } = useAuth();
 
-  // In a real app, this comes from your auth provider
-  const ownerAddress = "0x1234567890abcdef1234567890abcdef12345678";
+  // REQUIRED: Initialize SDK with ownerAddress
+  // This triggers Particle Auth Core connection and creates the DepositClient
+  const { isConnecting, isReady, error } = useDeposit({
+    ownerAddress: isConnected ? ownerAddress : undefined,
+  });
+
+  // Access context for current destination (after SDK is ready)
+  const { currentDestination, setDestination } = useDepositContext();
 
   // Handle chain selection
   const handleChainSelect = (chainId: number) => {
     setSelectedChainId(chainId);
     // Update the SDK's destination (address stays as ownerAddress)
-    setDestination({ chainId });
+    if (isReady) {
+      setDestination({ chainId });
+    }
   };
 
   const selectedChain = AVAILABLE_CHAINS.find((c) => c.id === selectedChainId);
+
+  // Loading state
+  if (isConnecting) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-gray-500">Initializing SDK...</p>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-red-500">Error: {error.message}</p>
+      </div>
+    );
+  }
+
+  // Not ready state
+  if (!isReady) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-gray-500">Connect your wallet to continue</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 max-w-2xl mx-auto">
@@ -153,9 +197,6 @@ function DepositPageContent() {
               chainId: selectedChainId,
               // No address = user's EOA
             }}
-            onDestinationChange={(dest) => {
-              console.log("Widget destination:", dest);
-            }}
           />
         </div>
       </div>
@@ -164,33 +205,45 @@ function DepositPageContent() {
       <div className="mt-8 space-y-4">
         <div className="p-4 bg-gray-900 rounded-lg">
           <h3 className="font-semibold text-white mb-2">
-            Simple: Just Chain ID
+            Full Example
           </h3>
           <pre className="text-sm text-green-400 overflow-x-auto">
-{`import { DepositModal, CHAIN } from '@particle-network/deposit-sdk/react';
+{`import {
+  DepositProvider,
+  DepositModal,
+  useDeposit,
+  CHAIN,
+} from '@particle-network/deposit-sdk/react';
 
-// Sweep to user's EOA on Base
-<DepositModal
-  isOpen={showModal}
-  onClose={() => setShowModal(false)}
-  destination={{ chainId: CHAIN.BASE }}
-/>`}
-          </pre>
-        </div>
+function App() {
+  const { address } = useYourAuthProvider();
+  const [chainId, setChainId] = useState(CHAIN.ARBITRUM);
 
-        <div className="p-4 bg-gray-900 rounded-lg">
-          <h3 className="font-semibold text-white mb-2">
-            Dynamic: User Selects Chain
-          </h3>
-          <pre className="text-sm text-green-400 overflow-x-auto">
-{`const [chainId, setChainId] = useState(CHAIN.ARBITRUM);
+  // REQUIRED: Initialize SDK with ownerAddress
+  const { isReady } = useDeposit({ ownerAddress: address });
 
-// Chain selector buttons
-<button onClick={() => setChainId(CHAIN.BASE)}>Base</button>
-<button onClick={() => setChainId(CHAIN.POLYGON)}>Polygon</button>
+  if (!isReady) return <Loading />;
 
-// Widget uses selected chain
-<DepositWidget destination={{ chainId }} />`}
+  return (
+    <>
+      {/* Chain selector */}
+      <button onClick={() => setChainId(CHAIN.BASE)}>Base</button>
+      <button onClick={() => setChainId(CHAIN.POLYGON)}>Polygon</button>
+
+      {/* Widget uses selected chain, sweeps to user's EOA */}
+      <DepositModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        destination={{ chainId }}
+      />
+    </>
+  );
+}
+
+// Wrap with DepositProvider at app root
+<DepositProvider>
+  <App />
+</DepositProvider>`}
           </pre>
         </div>
 
@@ -202,6 +255,7 @@ function DepositPageContent() {
 {`import { useDepositContext } from '@particle-network/deposit-sdk/react';
 
 function ChainSelector() {
+  // Access context (requires useDeposit to be called first)
   const { setDestination, currentDestination } = useDepositContext();
 
   return (
@@ -225,7 +279,7 @@ export default function WidgetChainOnlyExample() {
   return (
     <DepositProvider
       config={{
-        // Default destination - can be overridden by widget props
+        // Default destination - can be overridden by widget props or setDestination
         destination: { chainId: CHAIN.ARBITRUM },
       }}
     >
