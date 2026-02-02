@@ -5,7 +5,12 @@ import { X, Copy, QrCode, Check, Clock, AlertCircle } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { cn } from "../utils/cn";
 import type { DepositClient } from "../../core/DepositClient";
-import type { DetectedDeposit, SweepResult, TokenType, DestinationConfig } from "../../core/types";
+import type {
+  DetectedDeposit,
+  SweepResult,
+  TokenType,
+  DestinationConfig,
+} from "../../core/types";
 import { CHAIN, CHAIN_META, getChainName } from "../../constants/chains";
 import { useDepositContext } from "../context/DepositContext";
 
@@ -243,7 +248,7 @@ export function DepositWidget({
 
   const [selectedChain, setSelectedChain] = useState(CHAIN_OPTIONS[0]);
   const [selectedToken, setSelectedToken] = useState<TokenType>(
-    CHAIN_SUPPORTED_TOKENS[CHAIN_OPTIONS[0].id][0]
+    CHAIN_SUPPORTED_TOKENS[CHAIN_OPTIONS[0].id][0],
   );
   const [showTokenDropdown, setShowTokenDropdown] = useState(false);
   const [showChainDropdown, setShowChainDropdown] = useState(false);
@@ -333,8 +338,8 @@ export function DepositWidget({
     const handleProcessing = (deposit: DetectedDeposit) => {
       setActivity((prev) =>
         prev.map((item) =>
-          item.id === deposit.id ? { ...item, type: "processing" } : item
-        )
+          item.id === deposit.id ? { ...item, type: "processing" } : item,
+        ),
       );
     };
 
@@ -342,9 +347,9 @@ export function DepositWidget({
       setActivity((prev) =>
         prev.map((item) =>
           item.id === result.depositId
-            ? { ...item, type: "complete", message: "Swept successfully" }
-            : item
-        )
+            ? { ...item, type: "complete", message: "Bridged successfully" }
+            : item,
+        ),
       );
     };
 
@@ -354,8 +359,8 @@ export function DepositWidget({
           prev.map((item) =>
             item.id === deposit.id
               ? { ...item, type: "error", message: error.message }
-              : item
-          )
+              : item,
+          ),
         );
       }
     };
@@ -389,8 +394,8 @@ export function DepositWidget({
     const decimals = ["ETH", "BNB"].includes(token)
       ? 18
       : token === "SOL"
-      ? 9
-      : 6;
+        ? 9
+        : 6;
     const value = Number(amount) / Math.pow(10, decimals);
     return value.toFixed(value < 1 ? 4 : 2);
   };
@@ -428,7 +433,7 @@ export function DepositWidget({
           theme === "dark"
             ? "bg-[#09090b] border-[#27272a] text-white"
             : "bg-white border-gray-200 text-gray-900",
-          className
+          className,
         )}
         onClick={() => {
           setShowTokenDropdown(false);
@@ -445,7 +450,7 @@ export function DepositWidget({
                 "p-1 rounded transition-colors",
                 theme === "dark"
                   ? "text-[#52525b] hover:text-white"
-                  : "text-gray-500 hover:text-gray-900"
+                  : "text-gray-500 hover:text-gray-900",
               )}
             >
               <X size={20} />
@@ -460,7 +465,7 @@ export function DepositWidget({
               "flex h-11 rounded-xl border relative",
               theme === "dark"
                 ? "bg-[#18181b] border-[#27272a]"
-                : "bg-white border-gray-300"
+                : "bg-white border-gray-300",
             )}
           >
             {/* Token Selector */}
@@ -472,7 +477,7 @@ export function DepositWidget({
               }}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2.5 text-[13px] font-medium rounded-l-xl transition-colors",
-                theme === "dark" ? "hover:bg-[#27272a]" : "hover:bg-gray-100"
+                theme === "dark" ? "hover:bg-[#27272a]" : "hover:bg-gray-100",
               )}
             >
               <img
@@ -496,7 +501,7 @@ export function DepositWidget({
             <div
               className={cn(
                 "w-px h-5 self-center",
-                theme === "dark" ? "bg-[#27272a]" : "bg-gray-200"
+                theme === "dark" ? "bg-[#27272a]" : "bg-gray-200",
               )}
             />
 
@@ -509,7 +514,7 @@ export function DepositWidget({
               }}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2.5 text-[13px] font-medium rounded-r-xl transition-colors",
-                theme === "dark" ? "hover:bg-[#27272a]" : "hover:bg-gray-100"
+                theme === "dark" ? "hover:bg-[#27272a]" : "hover:bg-gray-100",
               )}
             >
               <img
@@ -536,7 +541,7 @@ export function DepositWidget({
                   "custom-scrollbar absolute top-full left-0 w-[52%] mt-1.5 p-1 rounded-xl border shadow-lg z-50 max-h-[240px] overflow-y-auto",
                   theme === "dark"
                     ? "bg-[#09090b] border-[#3f3f46]"
-                    : "bg-white border-gray-300"
+                    : "bg-white border-gray-300",
                 )}
                 style={{
                   scrollbarWidth: "thin",
@@ -562,7 +567,7 @@ export function DepositWidget({
                       selectedToken === token &&
                         (theme === "dark"
                           ? "bg-[#27272a] text-white"
-                          : "bg-gray-100 text-gray-900")
+                          : "bg-gray-100 text-gray-900"),
                     )}
                   >
                     <img
@@ -583,7 +588,7 @@ export function DepositWidget({
                   "custom-scrollbar absolute top-full right-0 w-[52%] mt-1.5 p-1 rounded-xl border shadow-lg z-50 max-h-[280px] overflow-y-auto",
                   theme === "dark"
                     ? "bg-[#09090b] border-[#3f3f46]"
-                    : "bg-white border-gray-300"
+                    : "bg-white border-gray-300",
                 )}
                 style={{
                   scrollbarWidth: "thin",
@@ -609,7 +614,7 @@ export function DepositWidget({
                       selectedChain.id === chain.id &&
                         (theme === "dark"
                           ? "bg-[#27272a] text-white"
-                          : "bg-gray-100 text-gray-900")
+                          : "bg-gray-100 text-gray-900"),
                     )}
                   >
                     <img
@@ -632,7 +637,7 @@ export function DepositWidget({
               "rounded-xl border p-1 relative",
               theme === "dark"
                 ? "bg-[#121212] border-[#27272a]"
-                : "bg-gray-50 border-gray-300"
+                : "bg-gray-50 border-gray-300",
             )}
           >
             {/* Address Row */}
@@ -641,7 +646,7 @@ export function DepositWidget({
                 <span
                   className={cn(
                     "text-[11px] font-medium uppercase tracking-wide",
-                    theme === "dark" ? "text-[#a1a1aa]" : "text-gray-600"
+                    theme === "dark" ? "text-[#a1a1aa]" : "text-gray-600",
                   )}
                 >
                   Deposit Address
@@ -658,7 +663,7 @@ export function DepositWidget({
                     theme === "dark"
                       ? "border-transparent hover:border-[#27272a] hover:bg-[#27272a] text-[#a1a1aa] hover:text-white"
                       : "border-transparent hover:border-gray-200 hover:bg-gray-100 text-gray-500 hover:text-gray-900",
-                    copied && "text-green-500"
+                    copied && "text-green-500",
                   )}
                   title="Copy address"
                 >
@@ -670,7 +675,7 @@ export function DepositWidget({
                     "w-8 h-8 flex items-center justify-center rounded-md border transition-all",
                     theme === "dark"
                       ? "border-transparent hover:border-[#27272a] hover:bg-[#27272a] text-[#a1a1aa] hover:text-white"
-                      : "border-transparent hover:border-gray-200 hover:bg-gray-100 text-gray-500 hover:text-gray-900"
+                      : "border-transparent hover:border-gray-200 hover:bg-gray-100 text-gray-500 hover:text-gray-900",
                   )}
                   title="Show QR code"
                 >
@@ -698,20 +703,20 @@ export function DepositWidget({
                 "mt-1 rounded-lg p-2.5 flex gap-2.5 items-start",
                 theme === "dark"
                   ? "bg-amber-500/10 border border-amber-500/15"
-                  : "bg-amber-50 border border-amber-200"
+                  : "bg-amber-50 border border-amber-200",
               )}
             >
               <AlertCircle
                 size={14}
                 className={cn(
                   "shrink-0 mt-0.5",
-                  theme === "dark" ? "text-amber-400" : "text-amber-600"
+                  theme === "dark" ? "text-amber-400" : "text-amber-600",
                 )}
               />
               <span
                 className={cn(
                   "text-[11px] leading-relaxed",
-                  theme === "dark" ? "text-amber-400/90" : "text-amber-700"
+                  theme === "dark" ? "text-amber-400/90" : "text-amber-700",
                 )}
               >
                 Only deposit <strong>{selectedToken}</strong> on{" "}
@@ -730,14 +735,14 @@ export function DepositWidget({
                 "rounded-xl border p-3 flex items-center justify-between",
                 theme === "dark"
                   ? "bg-[#18181b] border-[#27272a]"
-                  : "bg-gray-50 border-gray-200"
+                  : "bg-gray-50 border-gray-200",
               )}
             >
               <div className="flex items-center gap-3">
                 <div
                   className={cn(
                     "w-8 h-8 rounded-full flex items-center justify-center",
-                    theme === "dark" ? "bg-[#27272a]" : "bg-gray-200"
+                    theme === "dark" ? "bg-[#27272a]" : "bg-gray-200",
                   )}
                 >
                   {LOGO_URLS[currentDestination.chainId] ? (
@@ -750,7 +755,7 @@ export function DepositWidget({
                     <div
                       className={cn(
                         "w-5 h-5 rounded-full",
-                        theme === "dark" ? "bg-[#3f3f46]" : "bg-gray-300"
+                        theme === "dark" ? "bg-[#3f3f46]" : "bg-gray-300",
                       )}
                     />
                   )}
@@ -759,13 +764,14 @@ export function DepositWidget({
                   <span
                     className={cn(
                       "text-[10px] font-medium uppercase tracking-wide block",
-                      theme === "dark" ? "text-[#71717a]" : "text-gray-500"
+                      theme === "dark" ? "text-[#71717a]" : "text-gray-500",
                     )}
                   >
-                    Sweep To
+                    Bridge To
                   </span>
                   <span className="text-[13px] font-medium">
-                    {getChainName(currentDestination.chainId) || `Chain ${currentDestination.chainId}`}
+                    {getChainName(currentDestination.chainId) ||
+                      `Chain ${currentDestination.chainId}`}
                   </span>
                 </div>
               </div>
@@ -773,7 +779,7 @@ export function DepositWidget({
                 <span
                   className={cn(
                     "font-mono text-[12px]",
-                    theme === "dark" ? "text-[#a1a1aa]" : "text-gray-600"
+                    theme === "dark" ? "text-[#a1a1aa]" : "text-gray-600",
                   )}
                 >
                   {formatAddress(currentDestination.address)}
@@ -789,13 +795,13 @@ export function DepositWidget({
             "border-t",
             theme === "dark"
               ? "bg-[#121212] border-[#27272a]"
-              : "bg-gray-50 border-gray-200"
+              : "bg-gray-50 border-gray-200",
           )}
         >
           <div
             className={cn(
               "px-6 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wide",
-              theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500"
+              theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500",
             )}
           >
             Recent Activity
@@ -805,7 +811,7 @@ export function DepositWidget({
               <div
                 className={cn(
                   "px-6 py-8 text-center text-[13px]",
-                  theme === "dark" ? "text-[#52525b]" : "text-gray-400"
+                  theme === "dark" ? "text-[#52525b]" : "text-gray-400",
                 )}
               >
                 No deposits yet
@@ -818,7 +824,7 @@ export function DepositWidget({
                     "px-6 py-3 flex items-center justify-between border-b last:border-b-0 transition-colors",
                     theme === "dark"
                       ? "border-[#27272a] hover:bg-[#18181b]"
-                      : "border-gray-200 hover:bg-gray-100"
+                      : "border-gray-200 hover:bg-gray-100",
                   )}
                 >
                   <div className="flex items-center gap-3">
@@ -834,7 +840,7 @@ export function DepositWidget({
                         item.type === "detected" &&
                           "bg-blue-500/10 border-blue-500/20 text-blue-500",
                         item.type === "error" &&
-                          "bg-red-500/10 border-red-500/20 text-red-500"
+                          "bg-red-500/10 border-red-500/20 text-red-500",
                       )}
                     >
                       {item.type === "complete" && <Check size={14} />}
@@ -851,7 +857,7 @@ export function DepositWidget({
                           item.type === "processing" &&
                             (theme === "dark"
                               ? "text-[#a1a1aa]"
-                              : "text-gray-500")
+                              : "text-gray-500"),
                         )}
                       >
                         {item.type === "complete" && `Received ${item.token}`}
@@ -862,7 +868,7 @@ export function DepositWidget({
                       <p
                         className={cn(
                           "text-[11px]",
-                          theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500"
+                          theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500",
                         )}
                       >
                         {CHAIN_META[item.chainId]?.name ||
@@ -875,7 +881,7 @@ export function DepositWidget({
                     className={cn(
                       "font-mono text-[13px] font-medium",
                       item.type === "processing" &&
-                        (theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500")
+                        (theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500"),
                     )}
                   >
                     +{formatAmount(item.amount, item.token)}

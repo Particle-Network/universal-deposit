@@ -10,7 +10,7 @@
  * Key SDK features shown:
  * - DepositModal with destination prop
  * - Chain selection (destination.chainId)
- * - Auto-sweep to user's EOA (no custom address)
+ * - Auto-bridge to user's EOA (no custom address)
  */
 
 import { useState, useEffect } from "react";
@@ -24,6 +24,7 @@ import {
   DepositModal,
   CHAIN,
 } from "@particle-network/deposit-sdk/react";
+import { UniversalBalance } from "./UniversalBalance";
 
 // Destination chains available for selection
 const CHAINS = [
@@ -171,8 +172,11 @@ export function DepositDemo() {
         )}
 
         {/* Main Demo UI - shown when SDK is ready */}
-        {isReady && authenticated && (
+        {isReady && authenticated && ownerAddress && (
           <div className="space-y-4">
+            {/* Universal Account Balance */}
+            <UniversalBalance ownerAddress={ownerAddress} />
+
             {/* Chain Selection */}
             <div className="bg-zinc-900 rounded-xl p-6 border border-zinc-800">
               <h2 className="text-white font-semibold mb-1">
@@ -221,7 +225,7 @@ export function DepositDemo() {
             {/* Info Box */}
             <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800">
               <p className="text-zinc-400 text-sm">
-                <span className="text-green-400">●</span> Auto-sweep enabled.
+                <span className="text-green-400">●</span> Auto-bridge enabled.
                 Deposits are automatically sent to your wallet on{" "}
                 <span className="text-white font-medium">
                   {selectedChain?.name}
