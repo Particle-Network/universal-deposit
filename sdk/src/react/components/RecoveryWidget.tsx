@@ -14,6 +14,7 @@ import { cn } from "../utils/cn";
 import type { DepositClient } from "../../core/DepositClient";
 import type { DetectedDeposit, RecoveryResult, TokenType } from "../../core/types";
 import { CHAIN, CHAIN_META } from "../../constants/chains";
+import { getTokenDecimals } from "../../constants/tokens";
 import { useDepositContext } from "../context/DepositContext";
 
 export interface RecoveryWidgetProps {
@@ -223,14 +224,8 @@ export function RecoveryWidget({
   }, [client, stuckFunds]);
 
   // Format helpers
-  const formatAmount = (amount: string, token: TokenType) => {
-    const decimals = ["ETH", "BNB"].includes(token)
-      ? 18
-      : token === "SOL"
-      ? 9
-      : token === "BTC"
-      ? 8
-      : 6;
+  const formatAmount = (amount: string, token: TokenType, chainId: number) => {
+    const decimals = getTokenDecimals(token, chainId);
     const value = Number(amount) / Math.pow(10, decimals);
     return value.toFixed(value < 1 ? 6 : value < 100 ? 4 : 2);
   };
@@ -477,7 +472,7 @@ export function RecoveryWidget({
                       <div className="flex items-center gap-3">
                         <div className="text-right">
                           <p className="text-[13px] font-mono font-medium">
-                            {formatAmount(fund.amount, fund.token)}
+                            {formatAmount(fund.amount, fund.token, fund.chainId)}
                           </p>
                           <p
                             className={cn(

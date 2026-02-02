@@ -78,4 +78,41 @@ export const TOKEN_DECIMALS: Record<string, number> = {
   BNB: 18,
 };
 
+/**
+ * Chain-specific token decimal overrides.
+ * Some chains use different decimal places for standard tokens.
+ * For example, BNB Chain uses 18 decimals for USDC/USDT instead of 6.
+ */
+export const CHAIN_TOKEN_DECIMALS: Record<number, Record<string, number>> = {
+  [CHAIN.BNB]: {
+    USDC: 18,
+    USDT: 18,
+  },
+};
+
+/**
+ * Get the number of decimals for a token on a specific chain.
+ * Checks chain-specific overrides first, then falls back to global defaults.
+ *
+ * @param token - Token symbol (e.g., 'USDC', 'ETH')
+ * @param chainId - Optional chain ID for chain-specific decimal lookup
+ * @returns Number of decimals for the token
+ *
+ * @example
+ * getTokenDecimals('USDC')        // 6 (default)
+ * getTokenDecimals('USDC', 56)    // 18 (BNB chain override)
+ * getTokenDecimals('ETH', 56)     // 18 (global default, no override)
+ */
+export function getTokenDecimals(token: string, chainId?: number): number {
+  const upperToken = token.toUpperCase();
+
+  // Check chain-specific override first
+  if (chainId !== undefined && CHAIN_TOKEN_DECIMALS[chainId]?.[upperToken] !== undefined) {
+    return CHAIN_TOKEN_DECIMALS[chainId][upperToken];
+  }
+
+  // Fall back to global defaults
+  return TOKEN_DECIMALS[upperToken] ?? 6;
+}
+
 export const DEFAULT_SUPPORTED_TOKENS = ['ETH', 'USDC', 'USDT', 'BTC', 'SOL', 'BNB'] as const;

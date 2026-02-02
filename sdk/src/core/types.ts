@@ -242,3 +242,51 @@ export interface IntermediarySession {
   expiresAt: number;
   intermediaryAddress: string;
 }
+
+// ============================================
+// Transaction History Types
+// ============================================
+
+/**
+ * Transaction record from Universal Account history
+ * Retrieved via universalAccount.getTransactions()
+ */
+export interface UATransaction {
+  transactionId: string;
+  tag: string;
+  createdAt: string;
+  updatedAt: string;
+  targetToken: {
+    name: string;
+    type: string;
+    image: string;
+    price: number;
+    symbol: string;
+    address: string;
+    assetId: string;
+    chainId: number;
+    decimals: number;
+    realDecimals: number;
+    isPrimaryToken: boolean;
+    isSmartRouterSupported: boolean;
+  };
+  change: {
+    amount: string;
+    amountInUSD: string;
+    from: string;
+    to: string;
+  };
+  detail: {
+    redPacketCount: number;
+  };
+  status: number;
+  fromChains: number[];
+  toChains: number[];
+  exchangeRateUSD: Array<{
+    type: string;
+    exchangeRate: {
+      type: string;
+      price: number;
+    };
+  }>;
+}

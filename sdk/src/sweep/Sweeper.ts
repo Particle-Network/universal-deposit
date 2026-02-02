@@ -10,7 +10,7 @@
 import type { UAManager } from '../universal-account';
 import type { DetectedDeposit, SweepResult, AuthCoreProvider, TokenType } from '../core/types';
 import { SweepError } from '../core/errors';
-import { TOKEN_ADDRESSES, CHAIN } from '../constants';
+import { TOKEN_ADDRESSES, CHAIN, getTokenDecimals } from '../constants';
 
 export interface SweeperConfig {
   uaManager: UAManager;
@@ -95,7 +95,7 @@ export class Sweeper {
           console.log(`[Sweeper] Attempting: ${target.label} (${safePct}%)`);
 
           // Format amount for SDK (human-readable)
-          const decimals = this.getDecimals(deposit.token);
+          const decimals = this.getDecimals(deposit.token, deposit.chainId);
           const amountHuman = this.formatAmount(tryAmount, decimals);
 
           // Build transaction
@@ -217,14 +217,10 @@ export class Sweeper {
   }
 
   /**
-   * Get decimals for a token
+   * Get decimals for a token on a specific chain
    */
-  private getDecimals(token: TokenType): number {
-    const t = token.toLowerCase();
-    if (t === 'eth' || t === 'bnb') return 18;
-    if (t === 'btc') return 8;
-    if (t === 'sol') return 9;
-    return 6; // USDC, USDT
+  private getDecimals(token: TokenType, chainId: number): number {
+    return getTokenDecimals(token, chainId);
   }
 
   /**

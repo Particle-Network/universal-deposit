@@ -9,7 +9,7 @@
 
 import { UniversalAccount } from '@particle-network/universal-account-sdk';
 import { UniversalAccountError } from '../core/errors';
-import type { DepositAddresses, IntermediarySession } from '../core/types';
+import type { DepositAddresses, IntermediarySession, UATransaction } from '../core/types';
 import {
   DEFAULT_PROJECT_ID,
   DEFAULT_CLIENT_KEY,
@@ -151,6 +151,47 @@ export class UAManager {
    */
   isInitialized(): boolean {
     return this.initialized;
+  }
+
+  /**
+   * Get transaction history from the Universal Account
+   * @param page - Page number (1-indexed)
+   * @param pageSize - Number of transactions per page
+   * @returns Array of transactions ordered by most recent
+   */
+  async getTransactions(page: number = 1, pageSize: number = 10): Promise<UATransaction[]> {
+    if (!this.ua) {
+      throw new UniversalAccountError('UAManager not initialized. Call initialize() first.');
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = await (this.ua as any).getTransactions(page, pageSize);
+
+      // Handle different response formats from the UA SDK
+      // Response could be: array, { result: { data: [] } }, { data: [] }, etc.
+      if (Array.isArray(response)) {
+        return response;
+      }
+      // JSON-RPC wrapped response: { result: { data: [...] } }
+      if (response?.result?.data && Array.isArray(response.result.data)) {
+        return response.result.data;
+      }
+      if (response?.data && Array.isArray(response.data)) {
+        return response.data;
+      }
+      if (response?.transactions && Array.isArray(response.transactions)) {
+        return response.transactions;
+      }
+
+      console.warn('[UAManager] Unexpected getTransactions response format:', response);
+      return [];
+    } catch (error) {
+      throw new UniversalAccountError(
+        `Failed to get transactions: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error
+      );
+    }
   }
 
   /**

@@ -10,8 +10,10 @@ import type {
   SweepResult,
   TokenType,
   DestinationConfig,
+  UATransaction,
 } from "../../core/types";
 import { CHAIN, CHAIN_META, getChainName } from "../../constants/chains";
+import { getTokenDecimals } from "../../constants/tokens";
 import { useDepositContext } from "../context/DepositContext";
 
 export interface DepositWidgetProps {
@@ -41,12 +43,16 @@ export interface DepositWidgetProps {
 
 interface ActivityItem {
   id: string;
-  type: "detected" | "processing" | "complete" | "error";
+  type: "detected" | "processing" | "complete" | "error" | "history";
   token: string;
   chainId: number;
+  destinationChainId?: number;
   amount: string;
   timestamp: number;
   message?: string;
+  amountUSD?: number;
+  tokenImage?: string;
+  isOutgoing?: boolean;
 }
 
 const LOGO_URLS: Record<string, string> = {
@@ -378,6 +384,72 @@ export function DepositWidget({
     };
   }, [client]);
 
+  // Fetch transaction history on mount
+  useEffect(() => {
+    if (!client) return;
+
+    const fetchHistory = async () => {
+      try {
+        // Fetch more transactions since we filter to only incoming deposits
+        const transactions = await client.getTransactionHistory(10);
+
+        if (!Array.isArray(transactions) || transactions.length === 0) {
+          return;
+        }
+
+        // Filter to only show incoming deposits (tag === "receive" or positive amount)
+        // and limit to 3 most recent
+        const incomingTransactions = transactions
+          .filter((tx: UATransaction) => {
+            const amount = tx.change?.amount || "0";
+            return tx.tag === "receive" || amount.startsWith("+");
+          })
+          .slice(0, 3);
+
+        const historyItems: ActivityItem[] = incomingTransactions.map(
+          (tx: UATransaction) => {
+            const amount = tx.change?.amount || "0";
+            // Source chain where deposit was received
+            const chainId = tx.targetToken?.chainId || tx.fromChains?.[0] || 0;
+            // Destination chain where funds were bridged to
+            const destinationChainId = tx.toChains?.[0];
+
+            return {
+              id: `history:${tx.transactionId}`,
+              type: "history" as const,
+              token: tx.targetToken?.symbol?.toUpperCase() || "UNKNOWN",
+              chainId,
+              destinationChainId,
+              amount: amount.replace(/^[+-]/, ""),
+              timestamp: new Date(tx.createdAt).getTime(),
+              amountUSD: Math.abs(parseFloat(tx.change?.amountInUSD || "0")),
+              tokenImage: tx.targetToken?.image,
+              isOutgoing: false,
+            };
+          },
+        );
+
+        // Merge with existing activity, avoiding duplicates
+        setActivity((prev) => {
+          const existingIds = new Set(prev.map((item) => item.id));
+          const newHistoryItems = historyItems.filter(
+            (item) => !existingIds.has(item.id),
+          );
+          // Keep live items at the top, then existing history, then new history
+          const liveItems = prev.filter((item) => item.type !== "history");
+          const existingHistory = prev.filter((item) => item.type === "history");
+
+          // Only add new history items that don't already exist
+          return [...liveItems, ...existingHistory, ...newHistoryItems];
+        });
+      } catch (error) {
+        console.error("[DepositWidget] Failed to fetch transaction history:", error);
+      }
+    };
+
+    fetchHistory();
+  }, [client]);
+
   const copyAddress = useCallback(async () => {
     if (!depositAddress) return;
     await navigator.clipboard.writeText(depositAddress);
@@ -390,12 +462,8 @@ export function DepositWidget({
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   };
 
-  const formatAmount = (amount: string, token: string) => {
-    const decimals = ["ETH", "BNB"].includes(token)
-      ? 18
-      : token === "SOL"
-        ? 9
-        : 6;
+  const formatAmount = (amount: string, token: string, chainId: number) => {
+    const decimals = getTokenDecimals(token, chainId);
     const value = Number(amount) / Math.pow(10, decimals);
     return value.toFixed(value < 1 ? 4 : 2);
   };
@@ -841,6 +909,10 @@ export function DepositWidget({
                           "bg-blue-500/10 border-blue-500/20 text-blue-500",
                         item.type === "error" &&
                           "bg-red-500/10 border-red-500/20 text-red-500",
+                        item.type === "history" &&
+                          (item.isOutgoing
+                            ? "bg-orange-500/10 border-orange-500/20 text-orange-500"
+                            : "bg-green-500/10 border-green-500/20 text-green-500"),
                       )}
                     >
                       {item.type === "complete" && <Check size={14} />}
@@ -849,6 +921,7 @@ export function DepositWidget({
                       )}
                       {item.type === "detected" && <Check size={14} />}
                       {item.type === "error" && <X size={14} />}
+                      {item.type === "history" && <Check size={14} />}
                     </div>
                     <div>
                       <h4
@@ -864,6 +937,10 @@ export function DepositWidget({
                         {item.type === "processing" && "Processing..."}
                         {item.type === "detected" && `Detected ${item.token}`}
                         {item.type === "error" && "Failed"}
+                        {item.type === "history" &&
+                          (item.isOutgoing
+                            ? `Sent ${item.token}`
+                            : `Received ${item.token}`)}
                       </h4>
                       <p
                         className={cn(
@@ -872,7 +949,16 @@ export function DepositWidget({
                         )}
                       >
                         {CHAIN_META[item.chainId]?.name ||
-                          `Chain ${item.chainId}`}{" "}
+                          `Chain ${item.chainId}`}
+                        {item.type === "history" &&
+                          item.destinationChainId &&
+                          item.destinationChainId !== item.chainId && (
+                            <>
+                              {" → "}
+                              {CHAIN_META[item.destinationChainId]?.name ||
+                                `Chain ${item.destinationChainId}`}
+                            </>
+                          )}{" "}
                         • {formatTime(item.timestamp)}
                       </p>
                     </div>
@@ -882,9 +968,15 @@ export function DepositWidget({
                       "font-mono text-[13px] font-medium",
                       item.type === "processing" &&
                         (theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500"),
+                      item.type === "history" &&
+                        item.isOutgoing &&
+                        "text-orange-500",
                     )}
                   >
-                    +{formatAmount(item.amount, item.token)}
+                    {item.type === "history" && item.isOutgoing ? "-" : "+"}
+                    {item.type === "history" && item.amountUSD !== undefined
+                      ? `$${item.amountUSD.toFixed(2)}`
+                      : formatAmount(item.amount, item.token, item.chainId)}
                   </span>
                 </div>
               ))

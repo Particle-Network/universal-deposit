@@ -28,6 +28,8 @@ export type {
   RecoveryStatus,
   RecoveryResult,
   RecoveryConfig,
+  // Transaction history
+  UATransaction,
 } from './core/types';
 
 // Errors
@@ -49,6 +51,8 @@ export {
   PRIMARY_ASSETS_BY_CHAIN,
   TOKEN_ADDRESSES,
   TOKEN_DECIMALS,
+  CHAIN_TOKEN_DECIMALS,
+  getTokenDecimals,
   DEFAULT_SUPPORTED_TOKENS,
   DEFAULT_JWT_SERVICE_URL,
   DEFAULT_DESTINATION_CHAIN_ID,

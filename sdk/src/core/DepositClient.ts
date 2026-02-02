@@ -15,6 +15,7 @@ import type {
   IntermediarySession,
   RecoveryResult,
   TokenType,
+  UATransaction,
 } from './types';
 import {
   DEFAULT_JWT_SERVICE_URL,
@@ -598,6 +599,29 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
    */
   getDestination(): Readonly<{ address: string; chainId: number }> {
     return this.config.destination;
+  }
+
+  /**
+   * Get transaction history from the Universal Account.
+   *
+   * Returns recent transactions ordered by most recent first.
+   * Useful for displaying deposit history in the UI.
+   *
+   * @param limit - Maximum number of transactions to return (default: 3)
+   * @returns Array of transactions
+   *
+   * @example
+   * const history = await client.getTransactionHistory(5);
+   * history.forEach(tx => {
+   *   console.log(`${tx.targetToken.symbol}: ${tx.change.amount}`);
+   * });
+   */
+  async getTransactionHistory(limit: number = 3): Promise<UATransaction[]> {
+    if (!this.uaManager) {
+      throw new ConfigurationError('Client not initialized. Call initialize() first.');
+    }
+
+    return this.uaManager.getTransactions(1, limit);
   }
 
   // ============================================
