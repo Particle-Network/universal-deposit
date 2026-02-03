@@ -3,7 +3,7 @@
  */
 
 import { TypedEventEmitter } from './EventEmitter';
-import { ConfigurationError } from './errors';
+import { ConfigurationError, RefundError } from './errors';
 import type {
   DepositClientConfig,
   DepositEvents,
@@ -14,9 +14,13 @@ import type {
   ClientStatus,
   IntermediarySession,
   RecoveryResult,
+  RefundResult,
+  RefundConfig,
+  RefundReason,
   TokenType,
   UATransaction,
 } from './types';
+import { RefundService, DEFAULT_REFUND_CONFIG } from '../refund';
 import {
   DEFAULT_JWT_SERVICE_URL,
   DEFAULT_DESTINATION_CHAIN_ID,
@@ -55,6 +59,7 @@ export interface ResolvedConfig {
   minValueUSD: number;
   pollingIntervalMs: number;
   jwtServiceUrl: string;
+  refund: Required<RefundConfig>;
 }
 
 export class DepositClient extends TypedEventEmitter<DepositEvents> {
@@ -69,6 +74,10 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
   private uaManager: UAManager | null = null;
   private balanceWatcher: BalanceWatcher | null = null;
   private sweeper: Sweeper | null = null;
+  private refundService: RefundService | null = null;
+
+  // Refund tracking
+  private refundAttempts: Map<string, number> = new Map();
 
   constructor(config: DepositClientConfig) {
     super();
@@ -131,6 +140,12 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       minValueUSD: config.minValueUSD ?? DEFAULT_MIN_VALUE_USD,
       pollingIntervalMs: config.pollingIntervalMs ?? DEFAULT_POLLING_INTERVAL_MS,
       jwtServiceUrl: config.jwtServiceUrl ?? DEFAULT_JWT_SERVICE_URL,
+      refund: {
+        enabled: config.refund?.enabled ?? DEFAULT_REFUND_CONFIG.enabled,
+        delayMs: config.refund?.delayMs ?? DEFAULT_REFUND_CONFIG.delayMs,
+        maxAttempts: config.refund?.maxAttempts ?? DEFAULT_REFUND_CONFIG.maxAttempts,
+        refundToSender: config.refund?.refundToSender ?? DEFAULT_REFUND_CONFIG.refundToSender,
+      },
     };
   }
 
@@ -231,6 +246,17 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
         destination: this.config.destination,
       });
 
+      // Initialize RefundService if enabled
+      if (this.config.refund.enabled) {
+        this.refundService = new RefundService({
+          uaManager: this.uaManager,
+          authCoreProvider: this.config.authCoreProvider,
+          ownerAddress: this.config.ownerAddress,
+          refundConfig: this.config.refund,
+        });
+        console.log('[DepositSDK] Auto-refund enabled');
+      }
+
       // Wire up balance watcher events
       this.balanceWatcher.on('deposit:detected', (deposit) => {
         this.handleDepositDetected(deposit);
@@ -251,6 +277,7 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     this.stopWatching();
     this.removeAllListeners();
     this.pendingDeposits.clear();
+    this.refundAttempts.clear();
     this.depositAddresses = null;
     this.intermediarySession = null;
     this.intermediaryService.clearSession();
@@ -260,6 +287,7 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       this.balanceWatcher = null;
     }
     this.sweeper = null;
+    this.refundService = null;
     if (this.uaManager) {
       this.uaManager.destroy();
       this.uaManager = null;
@@ -682,8 +710,9 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
         .then((result) => {
           // Remove from pending
           this.pendingDeposits.delete(deposit.id);
+          this.refundAttempts.delete(deposit.id);
           this.emit('deposit:complete', result);
-          
+
           // Return to watching if still active
           if (this.balanceWatcher?.isActive()) {
             this.setStatus('watching');
@@ -694,14 +723,239 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
         .catch((error) => {
           console.error('[DepositSDK] Auto-sweep failed:', error);
           this.emit('deposit:error', error, deposit);
-          
-          // Return to watching if still active
-          if (this.balanceWatcher?.isActive()) {
-            this.setStatus('watching');
+
+          // Attempt auto-refund if enabled
+          if (this.config.refund.enabled && this.refundService) {
+            this.handleSweepFailure(deposit, 'sweep_failed');
           } else {
-            this.setStatus('ready');
+            // Return to watching if still active
+            if (this.balanceWatcher?.isActive()) {
+              this.setStatus('watching');
+            } else {
+              this.setStatus('ready');
+            }
           }
         });
     }
+  }
+
+  // ============================================
+  // Refund Operations
+  // ============================================
+
+  /**
+   * Handle sweep failure by attempting auto-refund
+   */
+  private async handleSweepFailure(deposit: DetectedDeposit, reason: RefundReason): Promise<void> {
+    if (!this.refundService) {
+      return;
+    }
+
+    const currentAttempts = this.refundAttempts.get(deposit.id) || 0;
+    const maxAttempts = this.config.refund.maxAttempts;
+
+    if (currentAttempts >= maxAttempts) {
+      console.warn(`[DepositSDK] Max refund attempts (${maxAttempts}) reached for ${deposit.id}`);
+      this.emit('refund:failed', deposit, new RefundError('Max refund attempts exceeded', deposit.id, deposit.chainId), true);
+
+      // Return to watching
+      if (this.balanceWatcher?.isActive()) {
+        this.setStatus('watching');
+      } else {
+        this.setStatus('ready');
+      }
+      return;
+    }
+
+    // Wait before attempting refund
+    const delayMs = this.config.refund.delayMs;
+    console.log(`[DepositSDK] Waiting ${delayMs}ms before refund attempt ${currentAttempts + 1}/${maxAttempts}`);
+
+    await this.delay(delayMs);
+
+    // Increment attempt counter
+    this.refundAttempts.set(deposit.id, currentAttempts + 1);
+
+    // Emit refund started
+    this.emit('refund:started', deposit, reason);
+    this.emit('refund:processing', deposit, currentAttempts + 1);
+
+    try {
+      const result = await this.refundService.refund(deposit, reason);
+
+      if (result.status === 'success') {
+        console.log(`[DepositSDK] Refund successful: ${deposit.token} on chain ${deposit.chainId}`);
+
+        // Remove from pending
+        this.pendingDeposits.delete(deposit.id);
+        this.refundAttempts.delete(deposit.id);
+
+        // Clear from balance watcher's processing keys
+        if (this.balanceWatcher) {
+          const key = `${deposit.token.toLowerCase()}:${deposit.chainId}`;
+          this.balanceWatcher.clearProcessingKey(key);
+        }
+
+        this.emit('refund:complete', result);
+      } else if (result.status === 'skipped') {
+        console.warn(`[DepositSDK] Refund skipped: ${result.error}`);
+        this.emit('refund:failed', deposit, new RefundError(result.error || 'Refund skipped', deposit.id, deposit.chainId), true);
+      } else {
+        throw new RefundError(result.error || 'Refund failed', deposit.id, deposit.chainId);
+      }
+    } catch (error) {
+      const refundError = error instanceof RefundError
+        ? error
+        : new RefundError(
+            error instanceof Error ? error.message : 'Unknown refund error',
+            deposit.id,
+            deposit.chainId,
+            currentAttempts + 1
+          );
+
+      console.error(`[DepositSDK] Refund attempt ${currentAttempts + 1} failed:`, error);
+
+      const exhausted = (currentAttempts + 1) >= maxAttempts;
+      this.emit('refund:failed', deposit, refundError, exhausted);
+
+      // If not exhausted, schedule another attempt
+      if (!exhausted) {
+        console.log(`[DepositSDK] Will retry refund...`);
+        // Recursive retry with exponential backoff could be added here
+        // For now, the deposit stays in pending for manual recovery
+      }
+    }
+
+    // Return to watching
+    if (this.balanceWatcher?.isActive()) {
+      this.setStatus('watching');
+    } else {
+      this.setStatus('ready');
+    }
+  }
+
+  /**
+   * Manually refund a specific deposit to its source chain
+   *
+   * @param depositId - The deposit ID to refund
+   * @param reason - Reason for the refund (default: 'user_requested')
+   * @returns RefundResult with status and details
+   *
+   * @example
+   * const result = await client.refund('deposit:eth:1:123456');
+   * if (result.status === 'success') {
+   *   console.log(`Refunded to ${result.refundedTo}`);
+   * }
+   */
+  async refund(depositId: string, reason: RefundReason = 'user_requested'): Promise<RefundResult> {
+    if (!this.refundService) {
+      throw new ConfigurationError('RefundService not initialized. Enable refund in config.');
+    }
+
+    const deposit = this.pendingDeposits.get(depositId);
+    if (!deposit) {
+      throw new ConfigurationError(`Deposit ${depositId} not found in pending deposits`);
+    }
+
+    this.emit('refund:started', deposit, reason);
+    this.emit('refund:processing', deposit, 1);
+
+    try {
+      const result = await this.refundService.refund(deposit, reason);
+
+      if (result.status === 'success') {
+        this.pendingDeposits.delete(depositId);
+        this.refundAttempts.delete(depositId);
+
+        if (this.balanceWatcher) {
+          const key = `${deposit.token.toLowerCase()}:${deposit.chainId}`;
+          this.balanceWatcher.clearProcessingKey(key);
+        }
+
+        this.emit('refund:complete', result);
+      } else {
+        this.emit('refund:failed', deposit, new RefundError(result.error || 'Refund failed', depositId, deposit.chainId), true);
+      }
+
+      return result;
+    } catch (error) {
+      const refundError = error instanceof RefundError
+        ? error
+        : new RefundError(error instanceof Error ? error.message : 'Unknown error', depositId, deposit.chainId);
+
+      this.emit('refund:failed', deposit, refundError, true);
+      throw refundError;
+    }
+  }
+
+  /**
+   * Refund all pending deposits to their source chains
+   *
+   * @param reason - Reason for the refunds (default: 'user_requested')
+   * @returns Array of RefundResults
+   *
+   * @example
+   * const results = await client.refundAll();
+   * const successful = results.filter(r => r.status === 'success');
+   * console.log(`Refunded ${successful.length} deposits`);
+   */
+  async refundAll(reason: RefundReason = 'user_requested'): Promise<RefundResult[]> {
+    if (!this.refundService) {
+      throw new ConfigurationError('RefundService not initialized. Enable refund in config.');
+    }
+
+    const results: RefundResult[] = [];
+    const deposits = Array.from(this.pendingDeposits.values());
+
+    for (const deposit of deposits) {
+      try {
+        const result = await this.refund(deposit.id, reason);
+        results.push(result);
+      } catch (error) {
+        results.push({
+          depositId: deposit.id,
+          token: deposit.token,
+          sourceChainId: deposit.chainId,
+          amount: deposit.amount,
+          amountUSD: deposit.amountUSD,
+          status: 'failed',
+          reason,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Get the current refund configuration
+   */
+  getRefundConfig(): Readonly<Required<RefundConfig>> {
+    return this.config.refund;
+  }
+
+  /**
+   * Check if a deposit can be refunded
+   */
+  async canRefund(depositId: string): Promise<{ eligible: boolean; reason?: string }> {
+    if (!this.refundService) {
+      return { eligible: false, reason: 'RefundService not initialized' };
+    }
+
+    const deposit = this.pendingDeposits.get(depositId);
+    if (!deposit) {
+      return { eligible: false, reason: 'Deposit not found' };
+    }
+
+    return this.refundService.checkRefundEligibility(deposit);
+  }
+
+  // ============================================
+  // Internal Helpers
+  // ============================================
+
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

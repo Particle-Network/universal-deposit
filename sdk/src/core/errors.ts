@@ -69,3 +69,17 @@ export class NetworkError extends DepositSDKError {
     Object.setPrototypeOf(this, NetworkError.prototype);
   }
 }
+
+export class RefundError extends DepositSDKError {
+  constructor(
+    message: string,
+    public depositId?: string,
+    public sourceChainId?: number,
+    public attempt?: number,
+    cause?: unknown
+  ) {
+    super(message, 'REFUND_ERROR', cause);
+    this.name = 'RefundError';
+    Object.setPrototypeOf(this, RefundError.prototype);
+  }
+}

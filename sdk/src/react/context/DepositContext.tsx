@@ -23,6 +23,9 @@ import type {
   ClientStatus,
   TokenType,
   RecoveryResult,
+  RefundResult,
+  RefundConfig,
+  RefundReason,
   DestinationConfig,
 } from "../../core/types";
 import {
@@ -76,6 +79,12 @@ export interface DepositConfig {
   autoSweep?: boolean;
   minValueUSD?: number;
   pollingIntervalMs?: number;
+  /**
+   * Auto-refund configuration.
+   * When enabled, if a sweep fails, funds are automatically returned to the source chain.
+   * @see RefundConfig for full documentation
+   */
+  refund?: RefundConfig;
 }
 
 export interface DepositContextValue {
@@ -112,6 +121,13 @@ export interface DepositContextValue {
   isRecovering: boolean;
   getStuckFunds: () => Promise<DetectedDeposit[]>;
   recoverFunds: () => Promise<RecoveryResult[]>;
+
+  // Refund actions
+  isRefunding: boolean;
+  refundDeposit: (depositId: string, reason?: RefundReason) => Promise<RefundResult>;
+  refundAll: (reason?: RefundReason) => Promise<RefundResult[]>;
+  canRefund: (depositId: string) => Promise<{ eligible: boolean; reason?: string }>;
+  refundConfig: RefundConfig | null;
 }
 
 interface ActivityItem {
@@ -177,6 +193,9 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
   const [stuckFunds, setStuckFunds] = useState<DetectedDeposit[]>([]);
   const [isRecovering, setIsRecovering] = useState(false);
 
+  // Refund state
+  const [isRefunding, setIsRefunding] = useState(false);
+
   // Setup client event listeners
   const setupClientListeners = useCallback((client: DepositClient) => {
     const handleStatusChange = (newStatus: ClientStatus) => {
@@ -235,11 +254,47 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       }
     };
 
+    const handleRefundStarted = (deposit: DetectedDeposit) => {
+      setRecentActivity((prev) =>
+        prev.map((item) =>
+          item.id === deposit.id
+            ? { ...item, type: "processing" as const }
+            : item
+        )
+      );
+    };
+
+    const handleRefundComplete = (result: RefundResult) => {
+      setPendingDeposits((prev) =>
+        prev.filter((d) => d.id !== result.depositId)
+      );
+      setRecentActivity((prev) =>
+        prev.map((item) =>
+          item.id === result.depositId
+            ? { ...item, type: "complete" as const }
+            : item
+        )
+      );
+    };
+
+    const handleRefundFailed = (deposit: DetectedDeposit, err: Error) => {
+      setRecentActivity((prev) =>
+        prev.map((item) =>
+          item.id === deposit.id
+            ? { ...item, type: "error" as const, error: err }
+            : item
+        )
+      );
+    };
+
     client.on("status:change", handleStatusChange);
     client.on("deposit:detected", handleDetected);
     client.on("deposit:processing", handleProcessing);
     client.on("deposit:complete", handleComplete);
     client.on("deposit:error", handleError);
+    client.on("refund:started", handleRefundStarted);
+    client.on("refund:complete", handleRefundComplete);
+    client.on("refund:failed", handleRefundFailed);
 
     return () => {
       client.off("status:change", handleStatusChange);
@@ -247,6 +302,9 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       client.off("deposit:processing", handleProcessing);
       client.off("deposit:complete", handleComplete);
       client.off("deposit:error", handleError);
+      client.off("refund:started", handleRefundStarted);
+      client.off("refund:complete", handleRefundComplete);
+      client.off("refund:failed", handleRefundFailed);
     };
   }, []);
 
@@ -376,6 +434,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
           autoSweep: config.autoSweep ?? true,
           minValueUSD: config.minValueUSD,
           pollingIntervalMs: config.pollingIntervalMs,
+          refund: config.refund,
         });
 
         setupClientListeners(client);
@@ -679,6 +738,53 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     }
   }, []);
 
+  // Refund methods
+  const refundDeposit = useCallback(async (depositId: string, reason?: RefundReason) => {
+    if (!clientRef.current) {
+      throw new Error("Client not initialized");
+    }
+    setIsRefunding(true);
+    try {
+      const result = await clientRef.current.refund(depositId, reason);
+      // Refresh stuck funds after refund
+      const remainingFunds = await clientRef.current.getStuckFunds();
+      setStuckFunds(remainingFunds);
+      return result;
+    } finally {
+      setIsRefunding(false);
+    }
+  }, []);
+
+  const refundAll = useCallback(async (reason?: RefundReason) => {
+    if (!clientRef.current) {
+      throw new Error("Client not initialized");
+    }
+    setIsRefunding(true);
+    try {
+      const results = await clientRef.current.refundAll(reason);
+      // Refresh stuck funds after refund
+      const remainingFunds = await clientRef.current.getStuckFunds();
+      setStuckFunds(remainingFunds);
+      return results;
+    } finally {
+      setIsRefunding(false);
+    }
+  }, []);
+
+  const canRefund = useCallback(async (depositId: string) => {
+    if (!clientRef.current) {
+      return { eligible: false, reason: "Client not initialized" };
+    }
+    return clientRef.current.canRefund(depositId);
+  }, []);
+
+  const getRefundConfig = useCallback((): RefundConfig | null => {
+    if (!clientRef.current) {
+      return null;
+    }
+    return clientRef.current.getRefundConfig();
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -712,6 +818,12 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     isRecovering,
     getStuckFunds,
     recoverFunds,
+    // Refund
+    isRefunding,
+    refundDeposit,
+    refundAll,
+    canRefund,
+    refundConfig: getRefundConfig(),
   };
 
   return (

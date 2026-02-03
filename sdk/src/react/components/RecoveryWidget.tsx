@@ -12,10 +12,12 @@ import {
 } from "lucide-react";
 import { cn } from "../utils/cn";
 import type { DepositClient } from "../../core/DepositClient";
-import type { DetectedDeposit, RecoveryResult, TokenType } from "../../core/types";
+import type { DetectedDeposit, RecoveryResult, RefundResult, TokenType } from "../../core/types";
 import { CHAIN, CHAIN_META } from "../../constants/chains";
 import { getTokenDecimals } from "../../constants/tokens";
 import { useDepositContext } from "../context/DepositContext";
+
+export type RecoveryMode = "recover" | "refund";
 
 export interface RecoveryWidgetProps {
   /**
@@ -29,6 +31,32 @@ export interface RecoveryWidgetProps {
    * Auto-scan for recoverable funds on mount. Default: true
    */
   autoScan?: boolean;
+  /**
+   * Whether the widget should expand to fill its container width.
+   * When false (default), widget has a fixed width of 380px.
+   * Use true for inline/embedded layouts.
+   * @default false
+   */
+  fullWidth?: boolean;
+  /**
+   * Whether to show the header section with title and close button.
+   * Use false for minimal embedded layouts where header is not needed.
+   * @default true
+   */
+  showHeader?: boolean;
+  /**
+   * Whether to show the mode selector (Recover vs Refund).
+   * When true, users can choose between sweeping to destination or refunding to source.
+   * @default true
+   */
+  showModeSelector?: boolean;
+  /**
+   * Default recovery mode.
+   * - "recover": Sweep funds to the configured destination (default)
+   * - "refund": Return funds to the source chain
+   * @default "recover"
+   */
+  defaultMode?: RecoveryMode;
 }
 
 type ItemStatus = "pending" | "processing" | "success" | "error";
@@ -82,8 +110,10 @@ function useOptionalDepositContext(): {
   client: DepositClient | null;
   stuckFunds: DetectedDeposit[];
   isRecovering: boolean;
+  isRefunding: boolean;
   getStuckFunds: () => Promise<DetectedDeposit[]>;
   recoverFunds: () => Promise<RecoveryResult[]>;
+  refundAll: () => Promise<RefundResult[]>;
 } | null {
   try {
     return useDepositContext();
@@ -98,6 +128,10 @@ export function RecoveryWidget({
   className,
   theme = "dark",
   autoScan = true,
+  fullWidth = false,
+  showHeader = true,
+  showModeSelector = true,
+  defaultMode = "recover",
 }: RecoveryWidgetProps) {
   // Try to get client/methods from context if not provided as prop
   const context = useOptionalDepositContext();
@@ -107,11 +141,13 @@ export function RecoveryWidget({
   const [isScanning, setIsScanning] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
   const [recoveryResults, setRecoveryResults] = useState<RecoveryResult[]>([]);
+  const [refundResults, setRefundResults] = useState<RefundResult[]>([]);
   const [itemStatuses, setItemStatuses] = useState<Map<string, ItemStatus>>(
     new Map()
   );
   const [error, setError] = useState<string | null>(null);
   const [hasScanned, setHasScanned] = useState(false);
+  const [mode, setMode] = useState<RecoveryMode>(defaultMode);
 
   // Scan for stuck funds
   const scanForFunds = useCallback(async () => {
@@ -173,13 +209,14 @@ export function RecoveryWidget({
     };
   }, [client, stuckFunds]);
 
-  // Recover all funds
+  // Recover all funds (sweep to destination)
   const handleRecoverAll = useCallback(async () => {
     if (!client || stuckFunds.length === 0) return;
 
     setIsRecovering(true);
     setError(null);
     setRecoveryResults([]);
+    setRefundResults([]);
 
     // Mark all as processing
     setItemStatuses((prev) => {
@@ -223,6 +260,64 @@ export function RecoveryWidget({
     }
   }, [client, stuckFunds]);
 
+  // Refund all funds (return to source chain)
+  const handleRefundAll = useCallback(async () => {
+    if (!client || stuckFunds.length === 0) return;
+
+    setIsRecovering(true);
+    setError(null);
+    setRecoveryResults([]);
+    setRefundResults([]);
+
+    // Mark all as processing
+    setItemStatuses((prev) => {
+      const next = new Map(prev);
+      stuckFunds.forEach((fund) => next.set(fund.id, "processing"));
+      return next;
+    });
+
+    try {
+      const results = await client.refundAll("user_requested");
+      setRefundResults(results);
+
+      // Update statuses based on results
+      setItemStatuses((prev) => {
+        const next = new Map(prev);
+        results.forEach((result) => {
+          // Find matching fund by depositId
+          const fund = stuckFunds.find((f) => f.id === result.depositId);
+          if (fund) {
+            next.set(fund.id, result.status === "success" ? "success" : "error");
+          }
+        });
+        return next;
+      });
+
+      // Refresh stuck funds to see remaining
+      const remaining = await client.getStuckFunds();
+      setStuckFunds(remaining);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Refund failed");
+      // Mark all as error on total failure
+      setItemStatuses((prev) => {
+        const next = new Map(prev);
+        stuckFunds.forEach((fund) => next.set(fund.id, "error"));
+        return next;
+      });
+    } finally {
+      setIsRecovering(false);
+    }
+  }, [client, stuckFunds]);
+
+  // Handle action based on mode
+  const handleAction = useCallback(() => {
+    if (mode === "recover") {
+      handleRecoverAll();
+    } else {
+      handleRefundAll();
+    }
+  }, [mode, handleRecoverAll, handleRefundAll]);
+
   // Format helpers
   const formatAmount = (amount: string, token: TokenType, chainId: number) => {
     const decimals = getTokenDecimals(token, chainId);
@@ -241,10 +336,11 @@ export function RecoveryWidget({
 
   const totalUSD = stuckFunds.reduce((sum, fund) => sum + fund.amountUSD, 0);
 
-  const successCount = recoveryResults.filter(
+  const allResults = mode === "recover" ? recoveryResults : refundResults;
+  const successCount = allResults.filter(
     (r) => r.status === "success"
   ).length;
-  const failedCount = recoveryResults.filter(
+  const failedCount = allResults.filter(
     (r) => r.status === "failed"
   ).length;
 
@@ -267,7 +363,8 @@ export function RecoveryWidget({
       `}</style>
       <div
         className={cn(
-          "w-[380px] rounded-[20px] border overflow-hidden shadow-2xl",
+          "rounded-[20px] border overflow-hidden shadow-2xl",
+          fullWidth ? "w-full" : "w-[380px]",
           theme === "dark"
             ? "bg-[#09090b] border-[#27272a] text-white"
             : "bg-white border-gray-200 text-gray-900",
@@ -275,27 +372,76 @@ export function RecoveryWidget({
         )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-4">
-          <h2 className="text-[15px] font-semibold">Recover Funds</h2>
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close recovery dialog"
-              className={cn(
-                "p-1 rounded transition-colors",
-                theme === "dark"
-                  ? "text-[#52525b] hover:text-white"
-                  : "text-gray-500 hover:text-gray-900"
-              )}
-            >
-              <X size={20} />
-            </button>
-          )}
-        </div>
+        {showHeader && (
+          <div className="flex items-center justify-between px-6 pt-5 pb-4">
+            <h2 className="text-[15px] font-semibold">Recover Funds</h2>
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close recovery dialog"
+                className={cn(
+                  "p-1 rounded transition-colors",
+                  theme === "dark"
+                    ? "text-[#52525b] hover:text-white"
+                    : "text-gray-500 hover:text-gray-900"
+                )}
+              >
+                <X size={20} />
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Content */}
-        <div className="px-6 pb-6">
+        <div className={cn("px-6 pb-6", !showHeader && "pt-5")}>
+          {/* Mode Selector */}
+          {showModeSelector && (
+            <div
+              className={cn(
+                "flex rounded-lg p-1 mb-4",
+                theme === "dark" ? "bg-[#1a1a1a]" : "bg-gray-100"
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => setMode("recover")}
+                disabled={isRecovering}
+                className={cn(
+                  "flex-1 py-2 px-3 rounded-md text-[12px] font-medium transition-all",
+                  mode === "recover"
+                    ? theme === "dark"
+                      ? "bg-[#27272a] text-white"
+                      : "bg-white text-gray-900 shadow-sm"
+                    : theme === "dark"
+                      ? "text-[#71717a] hover:text-[#a1a1aa]"
+                      : "text-gray-500 hover:text-gray-700",
+                  isRecovering && "cursor-not-allowed opacity-50"
+                )}
+              >
+                Recover to Wallet
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("refund")}
+                disabled={isRecovering}
+                className={cn(
+                  "flex-1 py-2 px-3 rounded-md text-[12px] font-medium transition-all",
+                  mode === "refund"
+                    ? theme === "dark"
+                      ? "bg-[#27272a] text-white"
+                      : "bg-white text-gray-900 shadow-sm"
+                    : theme === "dark"
+                      ? "text-[#71717a] hover:text-[#a1a1aa]"
+                      : "text-gray-500 hover:text-gray-700",
+                  isRecovering && "cursor-not-allowed opacity-50"
+                )}
+              >
+                Refund to Source
+              </button>
+            </div>
+          )}
+
           {/* Scanning State */}
           {isScanning && (
             <div
@@ -545,8 +691,8 @@ export function RecoveryWidget({
             </div>
           )}
 
-          {/* Recovery Results */}
-          {recoveryResults.length > 0 && (
+          {/* Recovery/Refund Results */}
+          {allResults.length > 0 && (
             <div
               className={cn(
                 "mt-4 rounded-xl border p-4",
@@ -562,7 +708,7 @@ export function RecoveryWidget({
                     theme === "dark" ? "text-[#a1a1aa]" : "text-gray-600"
                   )}
                 >
-                  Recovery Complete
+                  {mode === "recover" ? "Recovery" : "Refund"} Complete
                 </span>
                 <div className="flex items-center gap-3 text-[12px]">
                   {successCount > 0 && (
@@ -614,18 +760,22 @@ export function RecoveryWidget({
               Scan
             </button>
 
-            {/* Recover All Button */}
+            {/* Action Button */}
             <button
               type="button"
-              onClick={handleRecoverAll}
+              onClick={handleAction}
               disabled={
                 isScanning || isRecovering || stuckFunds.length === 0
               }
               className={cn(
                 "flex-[2] h-11 rounded-xl text-[13px] font-semibold transition-colors flex items-center justify-center gap-2",
-                theme === "dark"
-                  ? "bg-amber-500 hover:bg-amber-600 text-black disabled:bg-[#27272a] disabled:text-[#52525b]"
-                  : "bg-amber-500 hover:bg-amber-600 text-white disabled:bg-gray-200 disabled:text-gray-400",
+                mode === "recover"
+                  ? theme === "dark"
+                    ? "bg-amber-500 hover:bg-amber-600 text-black disabled:bg-[#27272a] disabled:text-[#52525b]"
+                    : "bg-amber-500 hover:bg-amber-600 text-white disabled:bg-gray-200 disabled:text-gray-400"
+                  : theme === "dark"
+                    ? "bg-blue-500 hover:bg-blue-600 text-white disabled:bg-[#27272a] disabled:text-[#52525b]"
+                    : "bg-blue-500 hover:bg-blue-600 text-white disabled:bg-gray-200 disabled:text-gray-400",
                 (isScanning || isRecovering || stuckFunds.length === 0) &&
                   "cursor-not-allowed"
               )}
@@ -633,11 +783,11 @@ export function RecoveryWidget({
               {isRecovering ? (
                 <>
                   <Loader2 size={14} className="animate-spin" />
-                  Recovering...
+                  {mode === "recover" ? "Recovering..." : "Refunding..."}
                 </>
               ) : (
                 <>
-                  Recover All
+                  {mode === "recover" ? "Recover All" : "Refund All"}
                   <ArrowRight size={14} />
                 </>
               )}
@@ -667,8 +817,9 @@ export function RecoveryWidget({
                   theme === "dark" ? "text-blue-400/90" : "text-blue-700"
                 )}
               >
-                These funds were deposited but not automatically swept. Click
-                "Recover All" to send them to your connected wallet.
+                {mode === "recover"
+                  ? 'These funds were deposited but not automatically swept. Click "Recover All" to send them to your connected wallet.'
+                  : 'Click "Refund All" to return funds to their original source chains. This is useful if the sweep to your wallet failed.'}
               </span>
             </div>
           )}

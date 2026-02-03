@@ -56,8 +56,9 @@ const client = new DepositClient(config: DepositClientConfig);
 | `minValueUSD` | `number` | No | `0.10` | Minimum USD value to trigger sweep |
 | `pollingIntervalMs` | `number` | No | `8000` | Balance check interval |
 | `recovery` | `RecoveryConfig` | No | — | Recovery behavior options |
+| `refund` | `RefundConfig` | No | `{ enabled: true }` | Auto-refund when sweep fails |
 
-*Required for sweep operations
+*Required for bridge operations
 
 #### Methods
 
@@ -204,6 +205,56 @@ const dest = client.getDestination();
 console.log(`Sweeping to ${dest.address} on chain ${dest.chainId}`);
 ```
 
+##### `refund(depositId: string, reason?: RefundReason): Promise<RefundResult>`
+
+Manually refund a specific deposit to its source chain.
+
+```typescript
+const result = await client.refund('deposit-id', 'user_requested');
+if (result.status === 'success') {
+  console.log(`Refunded to ${result.refundedTo}`);
+}
+```
+
+**Parameters:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `depositId` | `string` | ID of the deposit to refund |
+| `reason` | `RefundReason` | Reason for refund (default: `'user_requested'`) |
+
+**Returns:** `RefundResult` with status, txHash, refundedTo address, etc.
+
+##### `refundAll(reason?: RefundReason): Promise<RefundResult[]>`
+
+Refund all pending deposits to their source chains.
+
+```typescript
+const results = await client.refundAll();
+const successful = results.filter(r => r.status === 'success');
+console.log(`Refunded ${successful.length} deposits`);
+```
+
+##### `canRefund(depositId: string): Promise<{ eligible: boolean; reason?: string }>`
+
+Check if a deposit can be refunded.
+
+```typescript
+const { eligible, reason } = await client.canRefund('deposit-id');
+if (!eligible) {
+  console.log(`Cannot refund: ${reason}`);
+}
+```
+
+##### `getRefundConfig(): RefundConfig`
+
+Get current refund configuration.
+
+```typescript
+const config = client.getRefundConfig();
+console.log(`Auto-refund enabled: ${config.enabled}`);
+```
+
 ---
 
 ## React Integration
@@ -235,6 +286,7 @@ function App() {
 | `autoSweep` | `boolean` | `true` | Enable auto-sweep |
 | `minValueUSD` | `number` | `0.10` | Minimum USD threshold |
 | `pollingIntervalMs` | `number` | `8000` | Polling interval |
+| `refund` | `RefundConfig` | `{ enabled: true }` | Auto-refund configuration |
 
 **Destination Examples:**
 
@@ -333,6 +385,11 @@ function Component() {
 | `isRecovering` | `boolean` | Recovery in progress |
 | `getStuckFunds` | `() => Promise<DetectedDeposit[]>` | Refresh stuck funds |
 | `recoverFunds` | `() => Promise<RecoveryResult[]>` | Recover all funds |
+| `isRefunding` | `boolean` | Refund in progress |
+| `refundDeposit` | `(id: string) => Promise<RefundResult>` | Refund specific deposit |
+| `refundAll` | `() => Promise<RefundResult[]>` | Refund all pending deposits |
+| `canRefund` | `(id: string) => Promise<{ eligible: boolean; reason?: string }>` | Check refund eligibility |
+| `refundConfig` | `RefundConfig` | Current refund configuration |
 
 ### Components
 
@@ -365,15 +422,19 @@ import { DepositModal } from '@particle-network/deposit-sdk/react';
 
 #### RecoveryWidget
 
-Complete recovery UI for scanning and recovering stuck funds.
+Complete recovery UI for scanning and recovering stuck funds. Supports two modes:
+- **Recover to Wallet**: Sweep funds to your destination wallet (default behavior)
+- **Refund to Source**: Send funds back to the original sender
 
 ```tsx
 import { RecoveryWidget } from '@particle-network/deposit-sdk/react';
 
 <RecoveryWidget
-  theme="dark"        // 'dark' | 'light'
-  className="..."     // Custom CSS class
-  autoScan={true}     // Auto-scan on mount (default: true)
+  theme="dark"           // 'dark' | 'light'
+  className="..."        // Custom CSS class
+  autoScan={true}        // Auto-scan on mount (default: true)
+  showModeSelector={true} // Show mode toggle (default: true)
+  defaultMode="recover"  // 'recover' | 'refund' (default: 'recover')
 />
 ```
 
@@ -384,14 +445,27 @@ import { RecoveryWidget } from '@particle-network/deposit-sdk/react';
 | `className` | `string` | — | Custom CSS class |
 | `theme` | `'dark' \| 'light'` | `'dark'` | Color theme |
 | `autoScan` | `boolean` | `true` | Auto-scan for funds on mount |
+| `showModeSelector` | `boolean` | `true` | Show recover/refund mode toggle |
+| `defaultMode` | `'recover' \| 'refund'` | `'recover'` | Initial mode |
 
 **Features:**
 - Auto-scans for recoverable funds on mount
 - Displays all stuck funds with token icons, chain badges, amounts, and USD values
 - Per-item status tracking (pending → processing → success/error)
-- "Recover All" button to sweep all stuck funds
+- Mode toggle between "Recover to Wallet" and "Refund to Source"
+- "Recover All" or "Refund All" button depending on mode
 - "Scan" button to refresh the list
-- Shows recovery results summary after completion
+- Shows results summary after completion
+
+**Example - Refund-only mode:**
+
+```tsx
+// Show only refund option (hide mode selector, default to refund)
+<RecoveryWidget
+  showModeSelector={false}
+  defaultMode="refund"
+/>
+```
 
 #### RecoveryModal
 
@@ -405,6 +479,8 @@ import { RecoveryModal } from '@particle-network/deposit-sdk/react';
   onClose={() => {}}
   theme="dark"
   autoScan={true}
+  showModeSelector={true}
+  defaultMode="recover"
 />
 ```
 
@@ -417,6 +493,8 @@ import { RecoveryModal } from '@particle-network/deposit-sdk/react';
 | `overlayClassName` | `string` | — | Custom CSS class for overlay |
 | `theme` | `'dark' \| 'light'` | `'dark'` | Color theme |
 | `autoScan` | `boolean` | `true` | Auto-scan for funds on mount |
+| `showModeSelector` | `boolean` | `true` | Show recover/refund mode toggle |
+| `defaultMode` | `'recover' \| 'refund'` | `'recover'` | Initial mode |
 
 ---
 
@@ -533,6 +611,116 @@ interface RecoveryConfig {
 }
 ```
 
+### RefundConfig
+
+Configuration for automatic refunds when sweeps fail.
+
+```typescript
+interface RefundConfig {
+  /**
+   * Enable automatic refunds when sweep fails.
+   * @default true
+   */
+  enabled?: boolean;
+
+  /**
+   * Delay in milliseconds before attempting refund after sweep failure.
+   * @default 5000
+   */
+  delayMs?: number;
+
+  /**
+   * Maximum number of refund attempts per deposit.
+   * @default 2
+   */
+  maxAttempts?: number;
+
+  /**
+   * Try to refund to the original sender address (if detectable).
+   * Falls back to owner address if sender cannot be determined.
+   * @default true
+   */
+  refundToSender?: boolean;
+}
+```
+
+**Examples:**
+
+```typescript
+// Default: auto-refund enabled
+const client = new DepositClient({ ownerAddress, intermediaryAddress });
+
+// Disable auto-refund
+const client = new DepositClient({
+  ownerAddress,
+  intermediaryAddress,
+  refund: { enabled: false },
+});
+
+// Custom refund settings
+const client = new DepositClient({
+  ownerAddress,
+  intermediaryAddress,
+  refund: {
+    enabled: true,
+    delayMs: 10000,      // Wait 10s before refund
+    maxAttempts: 3,      // Try up to 3 times
+    refundToSender: true, // Send back to original sender
+  },
+});
+```
+
+### RefundResult
+
+Result of a refund operation.
+
+```typescript
+interface RefundResult {
+  depositId: string;         // Deposit ID
+  token: TokenType;          // Token type
+  sourceChainId: number;     // Chain where funds originated
+  amount: string;            // Amount refunded
+  amountUSD: number;         // USD value at time of refund
+  status: RefundStatus;      // 'success' | 'failed' | 'skipped'
+  reason: RefundReason;      // Why refund was triggered
+  txHash?: string;           // Transaction hash if success
+  error?: string;            // Error message if failed
+  refundedTo?: string;       // Address funds were sent to
+  refundedToSender?: boolean; // True if sent to original sender
+  timestamp: number;         // When refund was processed
+}
+```
+
+### RefundReason
+
+Why a refund was triggered.
+
+```typescript
+type RefundReason =
+  | 'sweep_failed'           // Auto-refund after sweep failure
+  | 'user_requested'         // Manual refund via refund() method
+  | 'address_type_mismatch'  // Incompatible address types (e.g., EVM vs Solana)
+  | 'below_minimum';         // Amount below minimum threshold
+```
+
+### RefundStatus
+
+```typescript
+type RefundStatus = 'success' | 'failed' | 'skipped';
+```
+
+### DepositOrigin
+
+Information about where a deposit originated (for refund targeting).
+
+```typescript
+interface DepositOrigin {
+  senderAddress: string;  // Original sender's address
+  chainId: number;        // Chain deposit came from
+  transactionId?: string; // Original transaction ID
+}
+```
+
 ### ClientStatus
 
 ```typescript
@@ -582,6 +770,36 @@ client.removeAllListeners();
 | `recovery:complete` | `RecoveryResult[]` | Recovery finished |
 | `recovery:failed` | `DetectedDeposit, Error` | Single recovery failed |
 
+### Refund Events
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `refund:started` | `DetectedDeposit, RefundReason` | Refund initiated |
+| `refund:processing` | `DetectedDeposit, attempt: number` | Refund attempt in progress |
+| `refund:complete` | `RefundResult` | Refund succeeded |
+| `refund:failed` | `DetectedDeposit, Error, attemptsExhausted: boolean` | Refund attempt failed |
+
+**Example:**
+
+```typescript
+// Listen for refund events
+client.on('refund:started', (deposit, reason) => {
+  console.log(`Refunding ${deposit.token}: ${reason}`);
+});
+
+client.on('refund:complete', (result) => {
+  console.log(`Refunded to ${result.refundedTo}`);
+  console.log(`Tx: ${result.txHash}`);
+});
+
+client.on('refund:failed', (deposit, error, exhausted) => {
+  console.error(`Refund failed: ${error.message}`);
+  if (exhausted) {
+    console.error('All refund attempts exhausted');
+  }
+});
+```
+
 ### Status Events
 
 | Event | Payload | Description |
@@ -600,6 +818,7 @@ import {
   JwtError,              // JWT service error
   UniversalAccountError, // UA operations failed
   SweepError,            // Sweep failed
+  RefundError,           // Refund failed
   NetworkError,          // Network issues
 } from '@particle-network/deposit-sdk';
 ```
@@ -804,7 +1023,101 @@ function DepositPage() {
         isOpen={showRecoveryModal}
         onClose={() => setShowRecoveryModal(false)}
         theme="dark"
+        showModeSelector={true}  // Allow user to choose recover vs refund
       />
+    </div>
+  );
+}
+```
+
+### Auto-Refund Example
+
+```tsx
+import {
+  DepositProvider,
+  useDeposit,
+  useDepositContext,
+  CHAIN,
+} from '@particle-network/deposit-sdk/react';
+
+function App() {
+  return (
+    // Enable auto-refund when sweeps fail
+    <DepositProvider config={{
+      autoSweep: true,
+      refund: {
+        enabled: true,
+        delayMs: 5000,        // Wait 5s before refund
+        maxAttempts: 2,       // Try up to 2 times
+        refundToSender: true, // Return to original sender
+      },
+    }}>
+      <DepositPage />
+    </DepositProvider>
+  );
+}
+
+function DepositPage() {
+  const { address } = useYourWallet();
+  const { isReady } = useDeposit({ ownerAddress: address });
+  const {
+    client,
+    isRefunding,
+    refundDeposit,
+    refundAll,
+    canRefund,
+    refundConfig,
+  } = useDepositContext();
+
+  // Listen for refund events
+  useEffect(() => {
+    if (!client) return;
+
+    const handleRefundComplete = (result) => {
+      console.log(`Refund complete: ${result.txHash}`);
+      console.log(`Sent to: ${result.refundedTo}`);
+    };
+
+    const handleRefundFailed = (deposit, error, exhausted) => {
+      if (exhausted) {
+        console.error('All refund attempts failed, manual intervention needed');
+      }
+    };
+
+    client.on('refund:complete', handleRefundComplete);
+    client.on('refund:failed', handleRefundFailed);
+
+    return () => {
+      client.off('refund:complete', handleRefundComplete);
+      client.off('refund:failed', handleRefundFailed);
+    };
+  }, [client]);
+
+  // Manual refund trigger
+  const handleManualRefund = async (depositId) => {
+    const { eligible, reason } = await canRefund(depositId);
+    if (!eligible) {
+      alert(`Cannot refund: ${reason}`);
+      return;
+    }
+
+    const result = await refundDeposit(depositId);
+    if (result.status === 'success') {
+      alert(`Refunded to ${result.refundedTo}`);
+    }
+  };
+
+  return (
+    <div>
+      <p>Auto-refund: {refundConfig?.enabled ? 'ON' : 'OFF'}</p>
+      <p>Refunding: {isRefunding ? 'Yes' : 'No'}</p>
+
+      <button
+        onClick={() => refundAll()}
+        disabled={isRefunding}
+      >
+        Refund All Pending
+      </button>
     </div>
   );
 }

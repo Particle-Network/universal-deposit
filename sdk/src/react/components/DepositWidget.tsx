@@ -39,6 +39,19 @@ export interface DepositWidgetProps {
    * @default true
    */
   showDestination?: boolean;
+  /**
+   * Whether the widget should expand to fill its container width.
+   * When false (default), widget has a fixed width of 380px.
+   * Use true for inline/embedded layouts.
+   * @default false
+   */
+  fullWidth?: boolean;
+  /**
+   * Whether to show the header section with title and close button.
+   * Use false for minimal embedded layouts where header is not needed.
+   * @default true
+   */
+  showHeader?: boolean;
 }
 
 interface ActivityItem {
@@ -241,6 +254,8 @@ export function DepositWidget({
   destination: destinationProp,
   onDestinationChange,
   showDestination = true,
+  fullWidth = false,
+  showHeader = true,
 }: DepositWidgetProps) {
   // Try to get client from context if not provided as prop
   const context = useOptionalDepositContext();
@@ -497,7 +512,8 @@ export function DepositWidget({
       `}</style>
       <div
         className={cn(
-          "w-[380px] rounded-[20px] border overflow-hidden shadow-2xl",
+          "rounded-[20px] border overflow-hidden shadow-2xl",
+          fullWidth ? "w-full" : "w-[380px]",
           theme === "dark"
             ? "bg-[#09090b] border-[#27272a] text-white"
             : "bg-white border-gray-200 text-gray-900",
@@ -509,25 +525,27 @@ export function DepositWidget({
         }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-4">
-          <h2 className="text-[15px] font-semibold">Deposit Assets</h2>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className={cn(
-                "p-1 rounded transition-colors",
-                theme === "dark"
-                  ? "text-[#52525b] hover:text-white"
-                  : "text-gray-500 hover:text-gray-900",
-              )}
-            >
-              <X size={20} />
-            </button>
-          )}
-        </div>
+        {showHeader && (
+          <div className="flex items-center justify-between px-6 pt-5 pb-4">
+            <h2 className="text-[15px] font-semibold">Deposit Assets</h2>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className={cn(
+                  "p-1 rounded transition-colors",
+                  theme === "dark"
+                    ? "text-[#52525b] hover:text-white"
+                    : "text-gray-500 hover:text-gray-900",
+                )}
+              >
+                <X size={20} />
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Token/Chain Selector */}
-        <div className="px-6 mb-4">
+        <div className={cn("px-6 mb-4", !showHeader && "pt-5")}>
           <div
             className={cn(
               "flex h-11 rounded-xl border relative",

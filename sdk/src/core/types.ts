@@ -111,8 +111,22 @@ export interface DepositClientConfig {
   minValueUSD?: number;
   pollingIntervalMs?: number;
 
-  // Recovery options
+  // Recovery options (manual recovery via RecoveryWidget)
   recovery?: RecoveryConfig;
+
+  /**
+   * Auto-refund configuration.
+   *
+   * When enabled, if a sweep to the destination fails after all retry strategies,
+   * the SDK will automatically attempt to return funds to the source chain.
+   *
+   * The refund will be sent to:
+   * 1. The original sender's address (if `refundToSender: true` and sender is known)
+   * 2. Otherwise, the owner's address on the source chain
+   *
+   * @default { enabled: true }
+   */
+  refund?: RefundConfig;
 
   // Advanced options (internal use)
   jwtServiceUrl?: string;
@@ -139,6 +153,11 @@ export interface DetectedDeposit {
   amountUSD: number;
   rawAmount: bigint;
   detectedAt: number;
+  /**
+   * Information about the original sender, if known.
+   * Populated from transaction history when available.
+   */
+  origin?: DepositOrigin;
 }
 
 // ============================================
@@ -185,6 +204,111 @@ export interface RecoveryConfig {
 }
 
 // ============================================
+// Refund Types
+// ============================================
+
+/**
+ * Configuration for automatic refunds when sweep fails.
+ *
+ * When enabled, if a sweep to the destination fails (after all retry strategies),
+ * the SDK will automatically attempt to send funds back to the source.
+ *
+ * @example
+ * // Enable auto-refund with defaults
+ * refund: { enabled: true }
+ *
+ * @example
+ * // Custom refund configuration
+ * refund: {
+ *   enabled: true,
+ *   delayMs: 10000,        // Wait 10s before refunding
+ *   maxAttempts: 3,        // Try up to 3 times
+ *   refundToSender: true,  // Refund to original sender (if known)
+ * }
+ */
+export interface RefundConfig {
+  /**
+   * Enable automatic refund when sweep fails.
+   * @default true
+   */
+  enabled?: boolean;
+
+  /**
+   * Delay in milliseconds before attempting refund after sweep failure.
+   * Allows time for transient issues to resolve.
+   * @default 5000
+   */
+  delayMs?: number;
+
+  /**
+   * Maximum number of refund attempts before giving up.
+   * After exhausting attempts, manual recovery via RecoveryWidget is required.
+   * @default 2
+   */
+  maxAttempts?: number;
+
+  /**
+   * If true, attempt to refund to the original sender address (detected from
+   * transaction history). If false or sender unknown, refunds to owner's
+   * address on the source chain.
+   * @default true
+   */
+  refundToSender?: boolean;
+}
+
+export type RefundStatus = 'pending' | 'processing' | 'success' | 'failed' | 'skipped';
+
+/**
+ * Result of a refund operation.
+ */
+export interface RefundResult {
+  /** The deposit ID that was refunded */
+  depositId: string;
+  /** Token type that was refunded */
+  token: TokenType;
+  /** Source chain where the deposit originated */
+  sourceChainId: number;
+  /** Amount refunded (human-readable) */
+  amount: string;
+  /** Amount in USD */
+  amountUSD: number;
+  /** Current status of the refund */
+  status: RefundStatus;
+  /** Transaction hash if refund was submitted */
+  txHash?: string;
+  /** Error message if refund failed */
+  error?: string;
+  /** Reason for the refund (e.g., "sweep_failed") */
+  reason: RefundReason;
+  /** Address where funds were refunded to */
+  refundedTo?: string;
+  /** Whether refund went to original sender or owner */
+  refundedToSender?: boolean;
+}
+
+/**
+ * Reason why a refund was triggered.
+ */
+export type RefundReason =
+  | 'sweep_failed'           // Primary sweep to destination failed
+  | 'user_requested'         // User manually requested refund
+  | 'address_type_mismatch'  // Cannot sweep due to EVM/Solana mismatch
+  | 'below_minimum';         // Deposit below minimum value threshold
+
+/**
+ * Information about the original sender of a deposit.
+ * Populated from transaction history when available.
+ */
+export interface DepositOrigin {
+  /** Original sender's address */
+  senderAddress: string;
+  /** Chain ID where the deposit was sent from */
+  chainId: number;
+  /** Transaction ID of the original deposit */
+  transactionId?: string;
+}
+
+// ============================================
 // EOA Balances
 // ============================================
 
@@ -221,6 +345,10 @@ export type DepositEvents = {
   'recovery:started': () => void;
   'recovery:complete': (results: RecoveryResult[]) => void;
   'recovery:failed': (deposit: DetectedDeposit, error: Error) => void;
+  'refund:started': (deposit: DetectedDeposit, reason: RefundReason) => void;
+  'refund:processing': (deposit: DetectedDeposit, attempt: number) => void;
+  'refund:complete': (result: RefundResult) => void;
+  'refund:failed': (deposit: DetectedDeposit, error: Error, exhausted: boolean) => void;
   'eoa:balances': (balances: EOABalance[]) => void;
   'status:change': (status: ClientStatus) => void;
   [key: string]: (...args: any[]) => void;

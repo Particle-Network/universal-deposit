@@ -8,7 +8,8 @@
  * swept to their connected wallet (EOA) on that chain.
  *
  * Key SDK features shown:
- * - DepositModal with destination prop
+ * - DepositModal with destination prop (modal mode)
+ * - DepositWidget inline display (embedded mode)
  * - Chain selection (destination.chainId)
  * - Auto-bridge to user's EOA (no custom address)
  */
@@ -22,6 +23,8 @@ import {
 import {
   useDeposit,
   DepositModal,
+  DepositWidget,
+  RecoveryModal,
   CHAIN,
 } from "@particle-network/deposit-sdk/react";
 import { UniversalBalance } from "./UniversalBalance";
@@ -36,12 +39,18 @@ const CHAINS = [
   { id: CHAIN.BNB, name: "BNB Chain", desc: "BSC" },
 ];
 
+type DisplayMode = "modal" | "inline";
+
 export function DepositDemo() {
   const { login, ready, authenticated, logout } = usePrivy();
   const { wallets } = useWallets();
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+
+  // Display mode: modal (button trigger) or inline (always visible)
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("modal");
 
   // Chain selection - default to Arbitrum
   const [selectedChainId, setSelectedChainId] = useState<number>(
@@ -177,6 +186,38 @@ export function DepositDemo() {
             {/* Universal Account Balance */}
             <UniversalBalance ownerAddress={ownerAddress} />
 
+            {/* Display Mode Selector */}
+            <div className="bg-zinc-900 rounded-xl p-4 border border-zinc-800">
+              <h2 className="text-white font-semibold mb-1 text-sm">
+                Display Mode
+              </h2>
+              <p className="text-zinc-500 text-xs mb-3">
+                Choose how to display the deposit widget
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setDisplayMode("modal")}
+                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                    displayMode === "modal"
+                      ? "bg-blue-600 text-white"
+                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  }`}
+                >
+                  Modal (Button)
+                </button>
+                <button
+                  onClick={() => setDisplayMode("inline")}
+                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+                    displayMode === "inline"
+                      ? "bg-blue-600 text-white"
+                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  }`}
+                >
+                  Inline (Embedded)
+                </button>
+              </div>
+            </div>
+
             {/* Chain Selection */}
             <div className="bg-zinc-900 rounded-xl p-6 border border-zinc-800">
               <h2 className="text-white font-semibold mb-1">
@@ -214,13 +255,25 @@ export function DepositDemo() {
               </div>
             </div>
 
-            {/* Open Deposit Button */}
-            <button
-              onClick={() => setShowModal(true)}
-              className="w-full py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-semibold"
-            >
-              Open Deposit Widget
-            </button>
+            {/* Modal Mode: Open Deposit Button */}
+            {displayMode === "modal" && (
+              <button
+                onClick={() => setShowModal(true)}
+                className="w-full py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-semibold"
+              >
+                Open Deposit Widget
+              </button>
+            )}
+
+            {/* Inline Mode: Embedded Widget */}
+            {displayMode === "inline" && (
+              <div className="flex justify-center">
+                <DepositWidget
+                  theme="dark"
+                  destination={{ chainId: selectedChainId }}
+                />
+              </div>
+            )}
 
             {/* Info Box */}
             <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800">
@@ -237,15 +290,40 @@ export function DepositDemo() {
             {/* Code Example */}
             <div className="p-4 bg-zinc-950 rounded-xl border border-zinc-800">
               <p className="text-zinc-500 text-xs mb-2 font-medium">
-                SDK Code:
+                SDK Code ({displayMode === "modal" ? "Modal" : "Inline"}):
               </p>
               <pre className="text-xs text-green-400 overflow-x-auto">
-                {`<DepositModal
+                {displayMode === "modal"
+                  ? `<DepositModal
   isOpen={showModal}
   onClose={() => setShowModal(false)}
   destination={{ chainId: CHAIN.${selectedChain?.name.toUpperCase().replace(" ", "_")} }}
+/>`
+                  : `<DepositWidget
+  theme="dark"
+  destination={{ chainId: CHAIN.${selectedChain?.name.toUpperCase().replace(" ", "_")} }}
 />`}
               </pre>
+            </div>
+
+            {/* Recovery Section */}
+            <div className="bg-zinc-900 rounded-xl p-4 border border-zinc-800">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-white font-semibold text-sm">
+                    Recovery & Refunds
+                  </h2>
+                  <p className="text-zinc-500 text-xs mt-1">
+                    Recover stuck funds or refund to sender
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowRecoveryModal(true)}
+                  className="px-4 py-2 bg-zinc-800 text-zinc-300 rounded-lg hover:bg-zinc-700 transition-colors text-sm font-medium"
+                >
+                  Open Recovery
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -256,6 +334,15 @@ export function DepositDemo() {
           onClose={() => setShowModal(false)}
           theme="dark"
           destination={{ chainId: selectedChainId }}
+        />
+
+        {/* Recovery Modal - supports both recover to wallet and refund to sender */}
+        <RecoveryModal
+          isOpen={showRecoveryModal}
+          onClose={() => setShowRecoveryModal(false)}
+          theme="dark"
+          showModeSelector={true}
+          defaultMode="refund"
         />
       </div>
     </div>

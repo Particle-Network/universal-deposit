@@ -28,6 +28,12 @@ export type {
   RecoveryStatus,
   RecoveryResult,
   RecoveryConfig,
+  // Refund types
+  RefundConfig,
+  RefundStatus,
+  RefundResult,
+  RefundReason,
+  DepositOrigin,
   // Transaction history
   UATransaction,
 } from './core/types';
@@ -41,6 +47,7 @@ export {
   UniversalAccountError,
   SweepError,
   NetworkError,
+  RefundError,
 } from './core/errors';
 
 // Constants
@@ -75,3 +82,7 @@ export type { UAManagerConfig, SmartAccountOptions, PrimaryAsset, PrimaryAssetsR
 // Sweep (for advanced use)
 export { BalanceWatcher, Sweeper } from './sweep';
 export type { BalanceWatcherConfig, BalanceSnapshot, SweeperConfig, SweepAttempt } from './sweep';
+
+// Refund (for advanced use)
+export { RefundService, DEFAULT_REFUND_CONFIG } from './refund';
+export type { RefundServiceConfig, RefundEligibility } from './refund';
