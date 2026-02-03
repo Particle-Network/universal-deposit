@@ -39,7 +39,7 @@ export interface RefundEligibility {
  * Default refund configuration values
  */
 export const DEFAULT_REFUND_CONFIG: Required<RefundConfig> = {
-  enabled: true,
+  enabled: false, // Disabled by default - experimental feature
   delayMs: 5000,
   maxAttempts: 2,
   refundToSender: true,

@@ -47,7 +47,8 @@ export interface RecoveryWidgetProps {
   /**
    * Whether to show the mode selector (Recover vs Refund).
    * When true, users can choose between sweeping to destination or refunding to source.
-   * @default true
+   * Note: Refund feature is experimental, so this is hidden by default.
+   * @default false
    */
   showModeSelector?: boolean;
   /**
@@ -130,7 +131,7 @@ export function RecoveryWidget({
   autoScan = true,
   fullWidth = false,
   showHeader = true,
-  showModeSelector = true,
+  showModeSelector = false,
   defaultMode = "recover",
 }: RecoveryWidgetProps) {
   // Try to get client/methods from context if not provided as prop

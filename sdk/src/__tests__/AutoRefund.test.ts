@@ -36,7 +36,7 @@ vi.mock('../refund', () => ({
     isRefunding: vi.fn().mockReturnValue(false),
   })),
   DEFAULT_REFUND_CONFIG: {
-    enabled: true,
+    enabled: false, // Disabled by default - tests explicitly enable when needed
     delayMs: 5000,
     maxAttempts: 2,
     refundToSender: true,
@@ -141,7 +141,8 @@ describe('Auto-Refund', () => {
 
       const config = clientWithDefaults.getConfig();
 
-      expect(config.refund.enabled).toBe(true);
+      // Auto-refund is disabled by default (experimental feature)
+      expect(config.refund.enabled).toBe(false);
       expect(config.refund.delayMs).toBe(5000);
       expect(config.refund.maxAttempts).toBe(2);
     });

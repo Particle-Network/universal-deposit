@@ -229,7 +229,8 @@ export interface RecoveryConfig {
 export interface RefundConfig {
   /**
    * Enable automatic refund when sweep fails.
-   * @default true
+   * Note: This feature is experimental and disabled by default.
+   * @default false
    */
   enabled?: boolean;
 

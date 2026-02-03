@@ -399,71 +399,101 @@ export function DepositWidget({
     };
   }, [client]);
 
+  // Fetch transaction history - extracted as callback for reuse
+  const fetchHistory = useCallback(async () => {
+    if (!client) return;
+
+    try {
+      // Fetch more transactions since we filter to only incoming deposits
+      const transactions = await client.getTransactionHistory(10);
+
+      if (!Array.isArray(transactions) || transactions.length === 0) {
+        return;
+      }
+
+      // Filter to only show incoming deposits (tag === "receive" or positive amount)
+      // and limit to 3 most recent
+      const incomingTransactions = transactions
+        .filter((tx: UATransaction) => {
+          const amount = tx.change?.amount || "0";
+          return tx.tag === "receive" || amount.startsWith("+");
+        })
+        .slice(0, 3);
+
+      const historyItems: ActivityItem[] = incomingTransactions.map(
+        (tx: UATransaction) => {
+          const amount = tx.change?.amount || "0";
+          // Source chain where deposit was received
+          const chainId = tx.targetToken?.chainId || tx.fromChains?.[0] || 0;
+          // Destination chain where funds were bridged to
+          const destinationChainId = tx.toChains?.[0];
+
+          return {
+            id: `history:${tx.transactionId}`,
+            type: "history" as const,
+            token: tx.targetToken?.symbol?.toUpperCase() || "UNKNOWN",
+            chainId,
+            destinationChainId,
+            amount: amount.replace(/^[+-]/, ""),
+            timestamp: new Date(tx.createdAt).getTime(),
+            amountUSD: Math.abs(parseFloat(tx.change?.amountInUSD || "0")),
+            tokenImage: tx.targetToken?.image,
+            isOutgoing: false,
+          };
+        },
+      );
+
+      // Merge with existing activity, avoiding duplicates
+      setActivity((prev) => {
+        const existingIds = new Set(prev.map((item) => item.id));
+        const newHistoryItems = historyItems.filter(
+          (item) => !existingIds.has(item.id),
+        );
+        // Keep live items at the top, then existing history, then new history
+        const liveItems = prev.filter((item) => item.type !== "history");
+        const existingHistory = prev.filter((item) => item.type === "history");
+
+        // Only add new history items that don't already exist
+        return [...liveItems, ...existingHistory, ...newHistoryItems];
+      });
+    } catch (error) {
+      console.error("[DepositWidget] Failed to fetch transaction history:", error);
+    }
+  }, [client]);
+
   // Fetch transaction history on mount
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  // Listen for refund events to update activity and refresh history
   useEffect(() => {
     if (!client) return;
 
-    const fetchHistory = async () => {
-      try {
-        // Fetch more transactions since we filter to only incoming deposits
-        const transactions = await client.getTransactionHistory(10);
-
-        if (!Array.isArray(transactions) || transactions.length === 0) {
-          return;
-        }
-
-        // Filter to only show incoming deposits (tag === "receive" or positive amount)
-        // and limit to 3 most recent
-        const incomingTransactions = transactions
-          .filter((tx: UATransaction) => {
-            const amount = tx.change?.amount || "0";
-            return tx.tag === "receive" || amount.startsWith("+");
-          })
-          .slice(0, 3);
-
-        const historyItems: ActivityItem[] = incomingTransactions.map(
-          (tx: UATransaction) => {
-            const amount = tx.change?.amount || "0";
-            // Source chain where deposit was received
-            const chainId = tx.targetToken?.chainId || tx.fromChains?.[0] || 0;
-            // Destination chain where funds were bridged to
-            const destinationChainId = tx.toChains?.[0];
-
-            return {
-              id: `history:${tx.transactionId}`,
-              type: "history" as const,
-              token: tx.targetToken?.symbol?.toUpperCase() || "UNKNOWN",
-              chainId,
-              destinationChainId,
-              amount: amount.replace(/^[+-]/, ""),
-              timestamp: new Date(tx.createdAt).getTime(),
-              amountUSD: Math.abs(parseFloat(tx.change?.amountInUSD || "0")),
-              tokenImage: tx.targetToken?.image,
-              isOutgoing: false,
-            };
-          },
-        );
-
-        // Merge with existing activity, avoiding duplicates
-        setActivity((prev) => {
-          const existingIds = new Set(prev.map((item) => item.id));
-          const newHistoryItems = historyItems.filter(
-            (item) => !existingIds.has(item.id),
-          );
-          // Keep live items at the top, then existing history, then new history
-          const liveItems = prev.filter((item) => item.type !== "history");
-          const existingHistory = prev.filter((item) => item.type === "history");
-
-          // Only add new history items that don't already exist
-          return [...liveItems, ...existingHistory, ...newHistoryItems];
-        });
-      } catch (error) {
-        console.error("[DepositWidget] Failed to fetch transaction history:", error);
-      }
+    const handleRefundComplete = () => {
+      // Refresh history after successful refund to show the transaction
+      fetchHistory();
     };
 
-    fetchHistory();
-  }, [client]);
+    const handleRefundFailed = (deposit: DetectedDeposit, error: Error) => {
+      // Update activity to show refund failure
+      setActivity((prev) =>
+        prev.map((item) =>
+          item.id === deposit.id
+            ? { ...item, type: "error" as const, message: `Refund failed: ${error.message}` }
+            : item,
+        ),
+      );
+    };
+
+    client.on("refund:complete", handleRefundComplete);
+    client.on("refund:failed", handleRefundFailed);
+
+    return () => {
+      client.off("refund:complete", handleRefundComplete);
+      client.off("refund:failed", handleRefundFailed);
+    };
+  }, [client, fetchHistory]);
 
   const copyAddress = useCallback(async () => {
     if (!depositAddress) return;
