@@ -22,6 +22,9 @@ export { RecoveryWidget as RecoveryInline } from './components/RecoveryWidget';
 export { useDeposit, type UseDepositOptions, type UseDepositReturn } from './hooks/useDeposit';
 export { useDepositClient, type UseDepositClientOptions, type UseDepositClientReturn } from './hooks/useDepositClient';
 
+// Types
+export type { ActivityItem } from './types';
+
 // Re-export commonly used types and constants for convenience
 export type { DestinationConfig } from '../core/types';
 export { CHAIN, getChainName } from '../constants/chains';

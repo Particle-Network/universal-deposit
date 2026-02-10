@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DepositClient } from '../../core/DepositClient';
-import type { 
-  DepositClientConfig, 
-  DepositAddresses, 
-  DetectedDeposit, 
+import type {
+  DepositClientConfig,
+  DepositAddresses,
+  DetectedDeposit,
   SweepResult,
-  ClientStatus 
+  ClientStatus
 } from '../../core/types';
+import type { ActivityItem } from '../types';
 
 export interface UseDepositClientOptions extends DepositClientConfig {
   autoInitialize?: boolean;
@@ -28,15 +29,6 @@ export interface UseDepositClientReturn {
   startWatching: () => void;
   stopWatching: () => void;
   sweep: (depositId?: string) => Promise<SweepResult[]>;
-}
-
-interface ActivityItem {
-  id: string;
-  type: 'detected' | 'processing' | 'complete' | 'error';
-  deposit: DetectedDeposit;
-  result?: SweepResult;
-  error?: Error;
-  timestamp: number;
 }
 
 export function useDepositClient(options: UseDepositClientOptions): UseDepositClientReturn {
@@ -67,8 +59,12 @@ export function useDepositClient(options: UseDepositClientOptions): UseDepositCl
       setRecentActivity(prev => [{
         id: deposit.id,
         type: 'detected' as const,
-        deposit,
+        token: deposit.token,
+        chainId: deposit.chainId,
+        amount: deposit.amount,
+        amountUSD: deposit.amountUSD,
         timestamp: Date.now(),
+        deposit,
       }, ...prev].slice(0, 50));
     };
 
@@ -81,8 +77,8 @@ export function useDepositClient(options: UseDepositClientOptions): UseDepositCl
     const handleComplete = (result: SweepResult) => {
       setPendingDeposits(prev => prev.filter(d => d.id !== result.depositId));
       setRecentActivity(prev => prev.map(item =>
-        item.id === result.depositId 
-          ? { ...item, type: 'complete' as const, result } 
+        item.id === result.depositId
+          ? { ...item, type: 'complete' as const, result, message: 'Bridged successfully' }
           : item
       ));
     };
@@ -90,8 +86,8 @@ export function useDepositClient(options: UseDepositClientOptions): UseDepositCl
     const handleError = (err: Error, deposit?: DetectedDeposit) => {
       if (deposit) {
         setRecentActivity(prev => prev.map(item =>
-          item.id === deposit.id 
-            ? { ...item, type: 'error' as const, error: err } 
+          item.id === deposit.id
+            ? { ...item, type: 'error' as const, message: err.message }
             : item
         ));
       } else {

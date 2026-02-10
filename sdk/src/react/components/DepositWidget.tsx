@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Copy, QrCode, Check, Clock, AlertCircle, AlertTriangle } from "lucide-react";
+import { X, Copy, QrCode, Check, Clock, AlertCircle, AlertTriangle, ArrowRight } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { cn } from "../utils/cn";
 import type { DepositClient } from "../../core/DepositClient";
@@ -12,9 +12,16 @@ import type {
   TokenType,
   DestinationConfig,
 } from "../../core/types";
-import { CHAIN, CHAIN_META, getChainName } from "../../constants/chains";
+import { CHAIN_META, getChainName } from "../../constants/chains";
 import { getTokenDecimals } from "../../constants/tokens";
+import { DEFAULT_MIN_VALUE_USD } from "../../constants";
 import { useDepositContext } from "../context/DepositContext";
+import type { ActivityItem } from "../types";
+import {
+  LOGO_URLS,
+  CHAIN_OPTIONS,
+  CHAIN_SUPPORTED_TOKENS,
+} from "../constants/widget-constants";
 
 export interface DepositWidgetProps {
   /**
@@ -54,188 +61,7 @@ export interface DepositWidgetProps {
   showHeader?: boolean;
 }
 
-interface ActivityItem {
-  id: string;
-  type: "detected" | "processing" | "complete" | "error" | "below_threshold";
-  token: string;
-  chainId: number;
-  amount: string;
-  amountUSD: number;
-  timestamp: number;
-  message?: string;
-}
-
-const LOGO_URLS: Record<string, string> = {
-  // Chains
-  [CHAIN.ETHEREUM]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png",
-  [CHAIN.ARBITRUM]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/arbitrum/info/logo.png",
-  [CHAIN.BASE]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/base/info/logo.png",
-  [CHAIN.POLYGON]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/polygon/info/logo.png",
-  [CHAIN.BNB]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/binance/info/logo.png",
-  [CHAIN.SOLANA]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/solana/info/logo.png",
-  [CHAIN.OPTIMISM]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/optimism/info/logo.png",
-  [CHAIN.AVALANCHE]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/avalanchec/info/logo.png",
-  [CHAIN.LINEA]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/linea/info/logo.png",
-  [CHAIN.MANTLE]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/mantle/info/logo.png",
-  [CHAIN.HYPERVM]:
-    "https://universalx.app/_next/image?url=https%3A%2F%2Fstatic.particle.network%2Fchains%2Fevm%2Ficons%2F999.png&w=32&q=75",
-  [CHAIN.MERLIN]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/merlin/info/logo.png",
-  [CHAIN.XLAYER]:
-    "https://universalx.app/_next/image?url=https%3A%2F%2Fstatic.particle.network%2Fchains%2Fevm%2Ficons%2F196.png&w=32&q=75",
-  [CHAIN.MONAD]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/monad/info/logo.png",
-  [CHAIN.SONIC]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/sonic/info/logo.png",
-  [CHAIN.PLASMA]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/plasma/info/logo.png",
-  [CHAIN.BERACHAIN]:
-    "https://universalx.app/_next/image?url=https%3A%2F%2Fstatic.particle.network%2Fchains%2Fevm%2Ficons%2F80094.png&w=32&q=75",
-  // Tokens
-  ETH: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png",
-  USDC: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
-  USDT: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png",
-  BTC: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/bitcoin/info/logo.png",
-  SOL: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/solana/info/logo.png",
-  BNB: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/binance/info/logo.png",
-};
-
-const CHAIN_OPTIONS = [
-  {
-    id: CHAIN.ETHEREUM,
-    name: "Ethereum",
-    color: "#627eea",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.BNB,
-    name: "BNB Chain",
-    color: "#f3ba2f",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.MANTLE,
-    name: "Mantle",
-    color: "#000000",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.MONAD,
-    name: "Monad",
-    color: "#6366f1",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.PLASMA,
-    name: "Plasma",
-    color: "#8b5cf6",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.XLAYER,
-    name: "X Layer",
-    color: "#000000",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.BASE,
-    name: "Base",
-    color: "#0052ff",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.ARBITRUM,
-    name: "Arbitrum",
-    color: "#12aaeb",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.AVALANCHE,
-    name: "Avalanche",
-    color: "#e84142",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.OPTIMISM,
-    name: "OP (Optimism)",
-    color: "#ff0420",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.POLYGON,
-    name: "Polygon",
-    color: "#8247e5",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.HYPERVM,
-    name: "HyperEVM",
-    color: "#00d4ff",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.BERACHAIN,
-    name: "Berachain",
-    color: "#f5841f",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.LINEA,
-    name: "Linea",
-    color: "#121212",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.SONIC,
-    name: "Sonic",
-    color: "#1969ff",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.MERLIN,
-    name: "Merlin",
-    color: "#f7931a",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.SOLANA,
-    name: "Solana",
-    color: "#9945ff",
-    addressType: "solana" as const,
-  },
-];
-
-const CHAIN_SUPPORTED_TOKENS: Record<number, TokenType[]> = {
-  [CHAIN.SOLANA]: ["USDC", "USDT", "SOL"],
-  [CHAIN.ETHEREUM]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.BASE]: ["USDC", "ETH", "BTC"],
-  [CHAIN.BNB]: ["USDC", "USDT", "ETH", "BTC", "BNB"],
-  [CHAIN.MANTLE]: ["USDT"],
-  [CHAIN.MONAD]: ["USDC"],
-  [CHAIN.PLASMA]: ["USDT"],
-  [CHAIN.XLAYER]: ["USDC", "USDT"],
-  [CHAIN.HYPERVM]: ["USDT"],
-  [CHAIN.SONIC]: ["USDC"],
-  [CHAIN.BERACHAIN]: ["USDC"],
-  [CHAIN.AVALANCHE]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.ARBITRUM]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.OPTIMISM]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.LINEA]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.POLYGON]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.MERLIN]: ["BTC"],
-};
-
-function useOptionalDepositContext(): { client: DepositClient | null } | null {
+function useOptionalDepositContext() {
   try {
     return useDepositContext();
   } catch {
@@ -257,6 +83,12 @@ export function DepositWidget({
   // Try to get client from context if not provided as prop
   const context = useOptionalDepositContext();
   const client = clientProp || context?.client || null;
+  const hasContext = context !== null;
+
+  // Activity: use context state when available, fallback to local for direct client prop
+  const [localActivity, setLocalActivity] = useState<ActivityItem[]>([]);
+  const activity = hasContext ? (context.recentActivity ?? []) : localActivity;
+  const recoveringIdsRef = useRef<Set<string>>(new Set());
 
   // Track current destination
   const [currentDestination, setCurrentDestination] = useState<{
@@ -280,9 +112,9 @@ export function DepositWidget({
   }, [selectedChain, selectedToken, availableTokens]);
   const [showQR, setShowQR] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [depositAddress, setDepositAddress] = useState<string>("");
-  const recoveringIdsRef = useRef<Set<string>>(new Set());
+  const autoSweep = client?.getConfig().autoSweep ?? true;
+  const minValueUSD = client?.getConfig().minValueUSD ?? DEFAULT_MIN_VALUE_USD;
 
   // Get deposit address based on selected chain
   useEffect(() => {
@@ -338,10 +170,14 @@ export function DepositWidget({
 
   const handleRecover = useCallback(
     async (item: ActivityItem) => {
+      if (hasContext) {
+        return context.recoverActivityItem(item.id);
+      }
+      // Fallback for direct client prop mode
       if (!client || recoveringIdsRef.current.has(item.id)) return;
 
       recoveringIdsRef.current.add(item.id);
-      setActivity((prev) =>
+      setLocalActivity((prev) =>
         prev.map((a) =>
           a.id === item.id ? { ...a, type: "processing" as const } : a,
         ),
@@ -359,39 +195,30 @@ export function DepositWidget({
         };
         const result = await client.recoverSingleDeposit(deposit);
         if (result.status === "success") {
-          setActivity((prev) =>
+          setLocalActivity((prev) =>
             prev.map((a) =>
               a.id === item.id
-                ? {
-                    ...a,
-                    type: "complete" as const,
-                    message: "Recovered successfully",
-                  }
+                ? { ...a, type: "complete" as const, message: "Recovered successfully" }
                 : a,
             ),
           );
         } else {
-          setActivity((prev) =>
+          setLocalActivity((prev) =>
             prev.map((a) =>
               a.id === item.id
-                ? {
-                    ...a,
-                    type: "error" as const,
-                    message: result.error || "Recovery failed",
-                  }
+                ? { ...a, type: "error" as const, message: result.error || "Recovery failed" }
                 : a,
             ),
           );
         }
       } catch (error) {
-        setActivity((prev) =>
+        setLocalActivity((prev) =>
           prev.map((a) =>
             a.id === item.id
               ? {
                   ...a,
                   type: "error" as const,
-                  message:
-                    error instanceof Error ? error.message : "Recovery failed",
+                  message: error instanceof Error ? error.message : "Recovery failed",
                 }
               : a,
           ),
@@ -400,30 +227,85 @@ export function DepositWidget({
         recoveringIdsRef.current.delete(item.id);
       }
     },
-    [client],
+    [client, hasContext, context],
   );
 
-  // Listen for deposit events
+  const handleBridge = useCallback(
+    async (item: ActivityItem) => {
+      if (hasContext) {
+        return context.bridgeActivityItem(item.id);
+      }
+      // Fallback for direct client prop mode
+      if (!client || recoveringIdsRef.current.has(item.id)) return;
+
+      recoveringIdsRef.current.add(item.id);
+      setLocalActivity((prev) =>
+        prev.map((a) =>
+          a.id === item.id ? { ...a, type: "processing" as const } : a,
+        ),
+      );
+
+      try {
+        const results = await client.sweep(item.id);
+        const result = results[0];
+        if (result?.status === "success") {
+          setLocalActivity((prev) =>
+            prev.map((a) =>
+              a.id === item.id
+                ? { ...a, type: "complete" as const, message: "Bridged successfully" }
+                : a,
+            ),
+          );
+        } else {
+          setLocalActivity((prev) =>
+            prev.map((a) =>
+              a.id === item.id
+                ? { ...a, type: "error" as const, message: result?.error || "Bridge failed" }
+                : a,
+            ),
+          );
+        }
+      } catch (error) {
+        setLocalActivity((prev) =>
+          prev.map((a) =>
+            a.id === item.id
+              ? {
+                  ...a,
+                  type: "error" as const,
+                  message: error instanceof Error ? error.message : "Bridge failed",
+                }
+              : a,
+          ),
+        );
+      } finally {
+        recoveringIdsRef.current.delete(item.id);
+      }
+    },
+    [client, hasContext, context],
+  );
+
+  // Listen for deposit events (only when using direct client prop without context)
   useEffect(() => {
-    if (!client) return;
+    if (!client || hasContext) return;
 
     const handleDetected = (deposit: DetectedDeposit) => {
-      setActivity((prev) => [
+      setLocalActivity((prev) => [
         {
           id: deposit.id,
-          type: "detected",
+          type: "detected" as const,
           token: deposit.token,
           chainId: deposit.chainId,
           amount: deposit.amount,
           amountUSD: deposit.amountUSD,
           timestamp: Date.now(),
+          deposit,
         },
         ...prev,
       ]);
     };
 
     const handleBelowThreshold = (deposit: DetectedDeposit) => {
-      setActivity((prev) => {
+      setLocalActivity((prev) => {
         const exists = prev.some(
           (item) =>
             item.type === "below_threshold" &&
@@ -441,6 +323,7 @@ export function DepositWidget({
             amountUSD: deposit.amountUSD,
             timestamp: Date.now(),
             message: "Too small to auto-bridge",
+            deposit,
           },
           ...prev,
         ];
@@ -448,18 +331,18 @@ export function DepositWidget({
     };
 
     const handleProcessing = (deposit: DetectedDeposit) => {
-      setActivity((prev) =>
+      setLocalActivity((prev) =>
         prev.map((item) =>
-          item.id === deposit.id ? { ...item, type: "processing" } : item,
+          item.id === deposit.id ? { ...item, type: "processing" as const } : item,
         ),
       );
     };
 
     const handleComplete = (result: SweepResult) => {
-      setActivity((prev) =>
+      setLocalActivity((prev) =>
         prev.map((item) =>
           item.id === result.depositId
-            ? { ...item, type: "complete", message: "Bridged successfully" }
+            ? { ...item, type: "complete" as const, result, message: "Bridged successfully" }
             : item,
         ),
       );
@@ -467,10 +350,10 @@ export function DepositWidget({
 
     const handleError = (error: Error, deposit?: DetectedDeposit) => {
       if (deposit) {
-        setActivity((prev) =>
+        setLocalActivity((prev) =>
           prev.map((item) =>
             item.id === deposit.id
-              ? { ...item, type: "error", message: error.message }
+              ? { ...item, type: "error" as const, message: error.message }
               : item,
           ),
         );
@@ -479,7 +362,7 @@ export function DepositWidget({
 
     const handleRecoveryComplete = (results: RecoveryResult[]) => {
       const consumedIndices = new Set<number>();
-      setActivity((prev) =>
+      setLocalActivity((prev) =>
         prev.map((item) => {
           if (item.type !== "error" && item.type !== "below_threshold")
             return item;
@@ -519,7 +402,7 @@ export function DepositWidget({
       client.off("deposit:error", handleError);
       client.off("recovery:complete", handleRecoveryComplete);
     };
-  }, [client]);
+  }, [client, hasContext]);
 
   const copyAddress = useCallback(async () => {
     if (!depositAddress) return;
@@ -855,16 +738,21 @@ export function DepositWidget({
                   theme === "dark" ? "text-amber-400" : "text-amber-600",
                 )}
               />
-              <span
+              <div
                 className={cn(
                   "text-[11px] leading-relaxed",
                   theme === "dark" ? "text-amber-400/90" : "text-amber-700",
                 )}
               >
-                Only deposit <strong>{selectedToken}</strong> on{" "}
-                <strong>{selectedChain.name}</strong>. Sending other assets may
-                result in permanent loss.
-              </span>
+                <p>
+                  Only deposit <strong>{selectedToken}</strong> on{" "}
+                  <strong>{selectedChain.name}</strong>. Sending other assets may
+                  result in permanent loss.
+                </p>
+                <p className="mt-1">
+                  Minimum deposit: <strong>${minValueUSD.toFixed(2)}</strong>
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -1041,6 +929,19 @@ export function DepositWidget({
                       )}
                     >
                       Recover
+                    </button>
+                  ) : item.type === "detected" && !autoSweep ? (
+                    <button
+                      onClick={() => handleBridge(item)}
+                      className={cn(
+                        "flex items-center gap-1.5 text-[12px] font-medium px-3 py-1 rounded-lg transition-colors",
+                        theme === "dark"
+                          ? "bg-blue-500/15 text-blue-400 hover:bg-blue-500/25"
+                          : "bg-blue-100 text-blue-700 hover:bg-blue-200",
+                      )}
+                    >
+                      Bridge
+                      <ArrowRight size={12} />
                     </button>
                   ) : (
                     <span

@@ -28,6 +28,7 @@ import type {
   RefundReason,
   DestinationConfig,
 } from "../../core/types";
+import type { ActivityItem } from "../types";
 import {
   DEFAULT_PROJECT_ID,
   DEFAULT_CLIENT_KEY,
@@ -109,6 +110,11 @@ export interface DepositContextValue {
   pendingDeposits: DetectedDeposit[];
   recentActivity: ActivityItem[];
 
+  // Activity actions (persist across widget mount/unmount)
+  recoverActivityItem: (itemId: string) => Promise<void>;
+  bridgeActivityItem: (itemId: string) => Promise<void>;
+  clearActivity: () => void;
+
   // Client actions
   startWatching: () => void;
   stopWatching: () => void;
@@ -128,15 +134,6 @@ export interface DepositContextValue {
   refundAll: (reason?: RefundReason) => Promise<RefundResult[]>;
   canRefund: (depositId: string) => Promise<{ eligible: boolean; reason?: string }>;
   refundConfig: RefundConfig | null;
-}
-
-interface ActivityItem {
-  id: string;
-  type: "detected" | "processing" | "complete" | "error";
-  deposit: DetectedDeposit;
-  result?: SweepResult;
-  error?: Error;
-  timestamp: number;
 }
 
 const DepositContext = createContext<DepositContextValue | null>(null);
@@ -196,6 +193,9 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
   // Refund state
   const [isRefunding, setIsRefunding] = useState(false);
 
+  // Ref to track in-flight recover/bridge operations
+  const recoveringIdsRef = useRef<Set<string>>(new Set());
+
   // Setup client event listeners
   const setupClientListeners = useCallback((client: DepositClient) => {
     const handleStatusChange = (newStatus: ClientStatus) => {
@@ -209,12 +209,42 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
           {
             id: deposit.id,
             type: "detected" as const,
-            deposit,
+            token: deposit.token,
+            chainId: deposit.chainId,
+            amount: deposit.amount,
+            amountUSD: deposit.amountUSD,
             timestamp: Date.now(),
+            deposit,
           },
           ...prev,
         ].slice(0, 50)
       );
+    };
+
+    const handleBelowThreshold = (deposit: DetectedDeposit) => {
+      setRecentActivity((prev) => {
+        const exists = prev.some(
+          (item) =>
+            item.type === "below_threshold" &&
+            item.token === deposit.token &&
+            item.chainId === deposit.chainId,
+        );
+        if (exists) return prev;
+        return [
+          {
+            id: deposit.id,
+            type: "below_threshold" as const,
+            token: deposit.token,
+            chainId: deposit.chainId,
+            amount: deposit.amount,
+            amountUSD: deposit.amountUSD,
+            timestamp: Date.now(),
+            message: "Too small to auto-bridge",
+            deposit,
+          },
+          ...prev,
+        ].slice(0, 50);
+      });
     };
 
     const handleProcessing = (deposit: DetectedDeposit) => {
@@ -234,7 +264,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       setRecentActivity((prev) =>
         prev.map((item) =>
           item.id === result.depositId
-            ? { ...item, type: "complete" as const, result }
+            ? { ...item, type: "complete" as const, result, message: "Bridged successfully" }
             : item
         )
       );
@@ -245,13 +275,40 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
         setRecentActivity((prev) =>
           prev.map((item) =>
             item.id === deposit.id
-              ? { ...item, type: "error" as const, error: err }
+              ? { ...item, type: "error" as const, message: err.message }
               : item
           )
         );
       } else {
         setError(err);
       }
+    };
+
+    const handleRecoveryComplete = (results: RecoveryResult[]) => {
+      const consumedIndices = new Set<number>();
+      setRecentActivity((prev) =>
+        prev.map((item) => {
+          if (item.type !== "error" && item.type !== "below_threshold")
+            return item;
+
+          const idx = results.findIndex(
+            (r, i) =>
+              !consumedIndices.has(i) &&
+              r.status === "success" &&
+              r.token === item.token &&
+              r.chainId === item.chainId,
+          );
+          if (idx !== -1) {
+            consumedIndices.add(idx);
+            return {
+              ...item,
+              type: "complete" as const,
+              message: "Recovered successfully",
+            };
+          }
+          return item;
+        }),
+      );
     };
 
     const handleRefundStarted = (deposit: DetectedDeposit) => {
@@ -271,7 +328,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       setRecentActivity((prev) =>
         prev.map((item) =>
           item.id === result.depositId
-            ? { ...item, type: "complete" as const }
+            ? { ...item, type: "complete" as const, message: "Refunded successfully" }
             : item
         )
       );
@@ -281,7 +338,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       setRecentActivity((prev) =>
         prev.map((item) =>
           item.id === deposit.id
-            ? { ...item, type: "error" as const, error: err }
+            ? { ...item, type: "error" as const, message: err.message }
             : item
         )
       );
@@ -289,9 +346,11 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
     client.on("status:change", handleStatusChange);
     client.on("deposit:detected", handleDetected);
+    client.on("deposit:below_threshold", handleBelowThreshold);
     client.on("deposit:processing", handleProcessing);
     client.on("deposit:complete", handleComplete);
     client.on("deposit:error", handleError);
+    client.on("recovery:complete", handleRecoveryComplete);
     client.on("refund:started", handleRefundStarted);
     client.on("refund:complete", handleRefundComplete);
     client.on("refund:failed", handleRefundFailed);
@@ -299,9 +358,11 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     return () => {
       client.off("status:change", handleStatusChange);
       client.off("deposit:detected", handleDetected);
+      client.off("deposit:below_threshold", handleBelowThreshold);
       client.off("deposit:processing", handleProcessing);
       client.off("deposit:complete", handleComplete);
       client.off("deposit:error", handleError);
+      client.off("recovery:complete", handleRecoveryComplete);
       client.off("refund:started", handleRefundStarted);
       client.off("refund:complete", handleRefundComplete);
       client.off("refund:failed", handleRefundFailed);
@@ -621,6 +682,118 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     ]
   );
 
+  // Activity actions - persist across widget mount/unmount
+  const recoverActivityItem = useCallback(async (itemId: string) => {
+    const client = clientRef.current;
+    if (!client || recoveringIdsRef.current.has(itemId)) return;
+
+    const item = recentActivity.find((a) => a.id === itemId);
+    if (!item) return;
+
+    recoveringIdsRef.current.add(itemId);
+    setRecentActivity((prev) =>
+      prev.map((a) =>
+        a.id === itemId ? { ...a, type: "processing" as const } : a,
+      ),
+    );
+
+    try {
+      const deposit: DetectedDeposit = {
+        id: item.id,
+        token: item.token as DetectedDeposit["token"],
+        chainId: item.chainId,
+        amount: item.amount,
+        amountUSD: item.amountUSD,
+        rawAmount: BigInt(item.amount),
+        detectedAt: item.timestamp,
+      };
+      const result = await client.recoverSingleDeposit(deposit);
+      if (result.status === "success") {
+        setRecentActivity((prev) =>
+          prev.map((a) =>
+            a.id === itemId
+              ? { ...a, type: "complete" as const, message: "Recovered successfully" }
+              : a,
+          ),
+        );
+      } else {
+        setRecentActivity((prev) =>
+          prev.map((a) =>
+            a.id === itemId
+              ? { ...a, type: "error" as const, message: result.error || "Recovery failed" }
+              : a,
+          ),
+        );
+      }
+    } catch (err) {
+      setRecentActivity((prev) =>
+        prev.map((a) =>
+          a.id === itemId
+            ? {
+                ...a,
+                type: "error" as const,
+                message: err instanceof Error ? err.message : "Recovery failed",
+              }
+            : a,
+        ),
+      );
+    } finally {
+      recoveringIdsRef.current.delete(itemId);
+    }
+  }, [recentActivity]);
+
+  const bridgeActivityItem = useCallback(async (itemId: string) => {
+    const client = clientRef.current;
+    if (!client || recoveringIdsRef.current.has(itemId)) return;
+
+    recoveringIdsRef.current.add(itemId);
+    setRecentActivity((prev) =>
+      prev.map((a) =>
+        a.id === itemId ? { ...a, type: "processing" as const } : a,
+      ),
+    );
+
+    try {
+      const results = await client.sweep(itemId);
+      const result = results[0];
+      if (result?.status === "success") {
+        setRecentActivity((prev) =>
+          prev.map((a) =>
+            a.id === itemId
+              ? { ...a, type: "complete" as const, result, message: "Bridged successfully" }
+              : a,
+          ),
+        );
+      } else {
+        setRecentActivity((prev) =>
+          prev.map((a) =>
+            a.id === itemId
+              ? { ...a, type: "error" as const, message: result?.error || "Bridge failed" }
+              : a,
+          ),
+        );
+      }
+    } catch (err) {
+      setRecentActivity((prev) =>
+        prev.map((a) =>
+          a.id === itemId
+            ? {
+                ...a,
+                type: "error" as const,
+                message: err instanceof Error ? err.message : "Bridge failed",
+              }
+            : a,
+        ),
+      );
+    } finally {
+      recoveringIdsRef.current.delete(itemId);
+    }
+  }, []);
+
+  const clearActivity = useCallback(() => {
+    setRecentActivity([]);
+  }, []);
+
   const disconnect = useCallback(async () => {
     // Prevent concurrent disconnect calls
     if (disconnectingRef.current) {
@@ -808,6 +981,9 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     depositAddresses,
     pendingDeposits,
     recentActivity,
+    recoverActivityItem,
+    bridgeActivityItem,
+    clearActivity,
     startWatching,
     stopWatching,
     sweep,
