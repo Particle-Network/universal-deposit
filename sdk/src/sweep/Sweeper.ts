@@ -92,6 +92,10 @@ export class Sweeper {
 
     const rawAmount = deposit.rawAmount;
 
+    if (!this.config.authCoreProvider) {
+      throw new SweepError('authCoreProvider is required for sweep operations');
+    }
+
     for (const target of targets) {
       for (const pct of percentages) {
         // For source chain fallback, always use 100%
@@ -118,11 +122,20 @@ export class Sweeper {
             receiver
           );
 
-          // Sign and send using Auth Core provider
-          if (!this.config.authCoreProvider) {
-            throw new SweepError('authCoreProvider is required for sweep operations');
+          // Sign using Auth Core provider - if signing fails, abort all attempts
+          // (signing failure = Auth Core issue, not a transaction issue)
+          let signature: string;
+          try {
+            signature = await this.config.authCoreProvider.signMessage(tx.rootHash);
+          } catch (signError) {
+            const err = new SweepError(
+              `Signing failed: ${signError instanceof Error ? signError.message : 'Unknown signing error'}`
+            );
+            err.code = 'SIGNING_FAILED';
+            throw err;
           }
-          const signature = await this.config.authCoreProvider.signMessage(tx.rootHash);
+
+          // Send transaction - if this fails, try next target/percentage
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await (ua as any).sendTransaction(tx, signature);
 
@@ -135,8 +148,12 @@ export class Sweeper {
             status: 'success',
           };
         } catch (error) {
+          // If this is a signing error, stop all attempts immediately
+          if (error instanceof SweepError && error.code === 'SIGNING_FAILED') {
+            throw error;
+          }
           console.warn(`[Sweeper] Failed attempt (${target.label}, ${safePct}%):`, error);
-          // Continue to next attempt
+          // Transaction error - continue to next attempt
         }
       }
     }

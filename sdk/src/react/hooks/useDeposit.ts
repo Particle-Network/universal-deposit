@@ -3,6 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useDepositContext } from '../context/DepositContext';
 import type { DepositContextValue } from '../context/DepositContext';
+import type { DestinationConfig } from '../../core/types';
 
 export interface UseDepositOptions {
   /**
@@ -10,6 +11,12 @@ export interface UseDepositOptions {
    * When provided, the SDK will automatically connect and initialize.
    */
   ownerAddress?: string;
+  /**
+   * Destination configuration for where swept funds are sent.
+   * When provided, the SDK destination is updated whenever this value changes.
+   * This ensures auto-sweep uses the correct destination regardless of widget state.
+   */
+  destination?: DestinationConfig;
 }
 
 export interface UseDepositReturn extends DepositContextValue {}
@@ -31,9 +38,9 @@ export interface UseDepositReturn extends DepositContextValue {}
  * ```
  */
 export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
-  const { ownerAddress } = options;
+  const { ownerAddress, destination } = options;
   const context = useDepositContext();
-  const { isConnected, isConnecting, connect, disconnect } = context;
+  const { isConnected, isConnecting, isReady, connect, disconnect, setDestination } = context;
   const operationRef = useRef<Promise<void> | null>(null);
   const lastAddressRef = useRef<string | undefined>(undefined);
   const pendingAddressRef = useRef<string | undefined>(undefined);
@@ -109,6 +116,16 @@ export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
       operationRef.current = null;
     });
   }, [ownerAddress, isConnected, isConnecting, connect, disconnect, normalizeAddress]);
+
+  // Sync destination to SDK when it changes
+  useEffect(() => {
+    if (!isReady || !destination) return;
+    try {
+      setDestination(destination);
+    } catch {
+      // Client may not be ready yet — will be applied on next render
+    }
+  }, [destination?.chainId, destination?.address, isReady, setDestination]);
 
   return context;
 }

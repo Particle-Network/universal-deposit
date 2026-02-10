@@ -62,9 +62,10 @@ export function DepositDemo() {
   const isWalletReady = authenticated && !!ownerAddress;
   const isWalletPending = authenticated && !ownerAddress;
 
-  // Initialize SDK with owner address
+  // Initialize SDK with owner address and sync destination chain
   const { isConnecting, isReady, error, disconnect } = useDeposit({
     ownerAddress: isWalletReady ? ownerAddress : undefined,
+    destination: { chainId: selectedChainId },
   });
 
   // Wallet creation timeout handling

@@ -12,6 +12,7 @@ import {
   AuthCoreContextProvider,
   useConnect,
   useEthereum,
+  useAuthCore,
 } from "@particle-network/auth-core-modal";
 import { AuthType } from "@particle-network/auth-core";
 import { DepositClient } from "../../core/DepositClient";
@@ -174,6 +175,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
   } = useConnect();
   const { address: authCoreAddress, provider: authCoreProvider } =
     useEthereum();
+  const { userInfo } = useAuthCore();
 
   // State
   const [isConnecting, setIsConnecting] = useState(false);
@@ -203,22 +205,55 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     };
 
     const handleDetected = (deposit: DetectedDeposit) => {
-      setPendingDeposits((prev) => [...prev, deposit]);
-      setRecentActivity((prev) =>
-        [
-          {
-            id: deposit.id,
-            type: "detected" as const,
-            token: deposit.token,
-            chainId: deposit.chainId,
-            amount: deposit.amount,
-            amountUSD: deposit.amountUSD,
-            timestamp: Date.now(),
-            deposit,
-          },
-          ...prev,
-        ].slice(0, 50)
-      );
+      setPendingDeposits((prev) => {
+        // Replace existing pending deposit for same token+chain instead of duplicating
+        const existingIdx = prev.findIndex(
+          (d) => d.token === deposit.token && d.chainId === deposit.chainId,
+        );
+        if (existingIdx !== -1) {
+          return prev.map((d, i) => (i === existingIdx ? deposit : d));
+        }
+        return [...prev, deposit];
+      });
+
+      setRecentActivity((prev) => {
+        const newItem = {
+          id: deposit.id,
+          type: "detected" as const,
+          token: deposit.token,
+          chainId: deposit.chainId,
+          amount: deposit.amount,
+          amountUSD: deposit.amountUSD,
+          timestamp: Date.now(),
+          deposit,
+        };
+
+        // Skip if there's already an in-flight or recently completed item
+        // for the same token+chain — prevents stale re-detection duplicates
+        const hasActiveItem = prev.some(
+          (item) =>
+            item.token === deposit.token &&
+            item.chainId === deposit.chainId &&
+            (item.type === "processing" ||
+              (item.type === "complete" &&
+                Date.now() - item.timestamp < 5 * 60 * 1000)),
+        );
+        if (hasActiveItem) return prev;
+
+        // Replace existing "detected" or "error" items for same token+chain
+        const existingIdx = prev.findIndex(
+          (item) =>
+            item.token === deposit.token &&
+            item.chainId === deposit.chainId &&
+            (item.type === "detected" || item.type === "error"),
+        );
+
+        if (existingIdx !== -1) {
+          return prev.map((item, i) => (i === existingIdx ? newItem : item));
+        }
+
+        return [newItem, ...prev].slice(0, 50);
+      });
     };
 
     const handleBelowThreshold = (deposit: DetectedDeposit) => {
@@ -261,13 +296,27 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       setPendingDeposits((prev) =>
         prev.filter((d) => d.id !== result.depositId)
       );
-      setRecentActivity((prev) =>
-        prev.map((item) =>
+      setRecentActivity((prev) => {
+        // Update the matching item to complete
+        const updated = prev.map((item) =>
           item.id === result.depositId
             ? { ...item, type: "complete" as const, result, message: "Bridged successfully" }
             : item
-        )
-      );
+        );
+        // Remove stale error items for the same token+chain (only older ones)
+        const completedItem = updated.find((item) => item.id === result.depositId);
+        if (completedItem) {
+          return updated.filter(
+            (item) =>
+              item.id === result.depositId ||
+              !(item.token === completedItem.token &&
+                item.chainId === completedItem.chainId &&
+                item.type === "error" &&
+                item.timestamp <= completedItem.timestamp),
+          );
+        }
+        return updated;
+      });
     };
 
     const handleError = (err: Error, deposit?: DetectedDeposit) => {
@@ -470,13 +519,35 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       }
 
       try {
-        console.log("[DepositSDK] 🏗️ Step 4: Creating DepositClient...");
+        // Validate blind signing eligibility before proceeding
+        // Particle Auth Core requires: JWT auth + no payment password + promptPaymentPasswordSettingWhenSign=false
+        // If passwords were set previously (even from another app), signing popups will appear
+        const securityAccount = userInfo?.security_account;
+        if (securityAccount) {
+          if (securityAccount.has_set_payment_password) {
+            console.warn(
+              "[DepositSDK] Intermediary account has a payment password set. " +
+              "Blind signing is NOT available - signing confirmation popups will appear."
+            );
+          }
+          if (securityAccount.has_set_master_password) {
+            console.warn(
+              "[DepositSDK] Intermediary account has a master password set. " +
+              "Blind signing requires the master password to have been entered during this session."
+            );
+          }
+        }
+
+        console.log("[DepositSDK] Step 4: Creating DepositClient...");
         console.log("[DepositSDK] Config:", {
           ownerAddress: currentOwner,
           intermediaryAddress: authCoreAddress,
           destinationChainId:
             config.destination?.chainId ?? DEFAULT_DESTINATION_CHAIN_ID,
           autoSweep: config.autoSweep ?? true,
+          blindSigningEligible: securityAccount
+            ? !securityAccount.has_set_payment_password && !securityAccount.has_set_master_password
+            : "unknown",
         });
 
         const client = new DepositClient({
@@ -588,14 +659,30 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
         return;
       }
 
-      // If already connected to Auth Core with matching intermediary, just set the owner address
+      // If already connected to Auth Core, verify the persisted session
+      // belongs to this ownerAddress before reusing it
       if (authCoreConnected && authCoreAddress && authCoreProvider && !ownerAddressRef.current) {
-        console.log(
-          "[DepositSDK] ✅ Auth Core already connected, reusing connection"
-        );
-        ownerAddressRef.current = ownerAddress;
-        setIsConnected(true);
-        return;
+        // Fetch the expected intermediary for this owner to validate
+        try {
+          const session = await intermediaryServiceRef.current.getSession(ownerAddress);
+          if (session.intermediaryAddress.toLowerCase() === authCoreAddress.toLowerCase()) {
+            console.log(
+              "[DepositSDK] Auth Core already connected with matching intermediary, reusing connection"
+            );
+            ownerAddressRef.current = ownerAddress;
+            setIsConnected(true);
+            return;
+          }
+          // Intermediary mismatch - persisted session is for a different user
+          console.warn(
+            "[DepositSDK] Persisted Auth Core session belongs to a different intermediary. " +
+            `Expected: ${session.intermediaryAddress}, Got: ${authCoreAddress}. Reconnecting...`
+          );
+          await authCoreDisconnect();
+        } catch (err) {
+          console.warn("[DepositSDK] Failed to validate persisted session, reconnecting:", err);
+          await authCoreDisconnect();
+        }
       }
 
       connectingRef.current = true;
@@ -676,6 +763,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       isConnecting,
       isConnected,
       authCoreConnect,
+      authCoreDisconnect,
       authCoreConnected,
       authCoreAddress,
       authCoreProvider,

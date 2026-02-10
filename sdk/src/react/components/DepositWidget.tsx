@@ -289,8 +289,8 @@ export function DepositWidget({
     if (!client || hasContext) return;
 
     const handleDetected = (deposit: DetectedDeposit) => {
-      setLocalActivity((prev) => [
-        {
+      setLocalActivity((prev) => {
+        const newItem = {
           id: deposit.id,
           type: "detected" as const,
           token: deposit.token,
@@ -299,9 +299,34 @@ export function DepositWidget({
           amountUSD: deposit.amountUSD,
           timestamp: Date.now(),
           deposit,
-        },
-        ...prev,
-      ]);
+        };
+
+        // Skip if there's already an in-flight or recently completed item
+        // for the same token+chain — prevents stale re-detection duplicates
+        const hasActiveItem = prev.some(
+          (item) =>
+            item.token === deposit.token &&
+            item.chainId === deposit.chainId &&
+            (item.type === "processing" ||
+              (item.type === "complete" &&
+                Date.now() - item.timestamp < 5 * 60 * 1000)),
+        );
+        if (hasActiveItem) return prev;
+
+        // Replace existing "detected" or "error" items for same token+chain
+        const existingIdx = prev.findIndex(
+          (item) =>
+            item.token === deposit.token &&
+            item.chainId === deposit.chainId &&
+            (item.type === "detected" || item.type === "error"),
+        );
+
+        if (existingIdx !== -1) {
+          return prev.map((item, i) => (i === existingIdx ? newItem : item));
+        }
+
+        return [newItem, ...prev].slice(0, 50);
+      });
     };
 
     const handleBelowThreshold = (deposit: DetectedDeposit) => {
@@ -339,13 +364,26 @@ export function DepositWidget({
     };
 
     const handleComplete = (result: SweepResult) => {
-      setLocalActivity((prev) =>
-        prev.map((item) =>
+      setLocalActivity((prev) => {
+        const updated = prev.map((item) =>
           item.id === result.depositId
             ? { ...item, type: "complete" as const, result, message: "Bridged successfully" }
             : item,
-        ),
-      );
+        );
+        // Remove stale error items for the same token+chain (only older ones)
+        const completedItem = updated.find((item) => item.id === result.depositId);
+        if (completedItem) {
+          return updated.filter(
+            (item) =>
+              item.id === result.depositId ||
+              !(item.token === completedItem.token &&
+                item.chainId === completedItem.chainId &&
+                item.type === "error" &&
+                item.timestamp <= completedItem.timestamp),
+          );
+        }
+        return updated;
+      });
     };
 
     const handleError = (error: Error, deposit?: DetectedDeposit) => {

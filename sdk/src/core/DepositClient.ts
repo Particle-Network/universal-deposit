@@ -80,6 +80,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
 
   // Refund tracking
   private refundAttempts: Map<string, number> = new Map();
+  private activeSweeps: Set<string> = new Set();
+  private static readonly SWEEP_RETRY_DELAY_MS = 5000;
 
   constructor(config: DepositClientConfig) {
     super();
@@ -286,6 +288,7 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     this.sweepRetries.clear();
     this.originalDepositIds.clear();
     this.refundAttempts.clear();
+    this.activeSweeps.clear();
     this.depositAddresses = null;
     this.intermediarySession = null;
     this.intermediaryService.clearSession();
@@ -749,20 +752,20 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     const retryKey = `${deposit.token.toLowerCase()}:${deposit.chainId}`;
     const attempts = this.sweepRetries.get(retryKey) || 0;
 
-    // If this is a re-detection after a failed sweep, preserve the original
+    // Skip if a sweep is already in-flight for this token+chain
+    if (this.activeSweeps.has(retryKey)) {
+      console.log(`[DepositSDK] Sweep already in progress for ${retryKey}, skipping`);
+      return;
+    }
+
+    // If this is a retry after a failed sweep, preserve the original
     // deposit ID so the UI activity item can be updated (not duplicated)
     if (attempts > 0) {
       const originalId = this.originalDepositIds.get(retryKey);
       if (originalId) {
-        // Remove stale pendingDeposit entry (previous detection had different ID)
-        for (const [id] of this.pendingDeposits) {
-          if (id !== originalId && id.startsWith(retryKey.replace(':', ':'))) {
-            this.pendingDeposits.delete(id);
-          }
-        }
         deposit = { ...deposit, id: originalId };
       }
-      console.log(`[DepositSDK] Re-detected deposit (retry ${attempts + 1}/${DepositClient.MAX_SWEEP_RETRIES}):`, deposit);
+      console.log(`[DepositSDK] Retrying sweep (attempt ${attempts + 1}/${DepositClient.MAX_SWEEP_RETRIES}):`, deposit.id);
       this.pendingDeposits.set(deposit.id, deposit);
       this.emit('deposit:processing', deposit);
     } else {
@@ -778,10 +781,12 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
         this.emit('deposit:processing', deposit);
       }
       this.setStatus('sweeping');
+      this.activeSweeps.add(retryKey);
 
       const currentDeposit = deposit;
       this.sweeper.sweep(currentDeposit)
         .then((result) => {
+          this.activeSweeps.delete(retryKey);
           // Success - clean up all tracking state
           this.pendingDeposits.delete(currentDeposit.id);
           this.refundAttempts.delete(currentDeposit.id);
@@ -799,21 +804,20 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
           }
         })
         .catch((error) => {
+          this.activeSweeps.delete(retryKey);
           console.error(`[DepositSDK] Auto-sweep failed (attempt ${attempts + 1}/${DepositClient.MAX_SWEEP_RETRIES}):`, error);
 
-          // Always emit error so UI never stays stuck on "Processing..."
-          // On retry re-detection, deposit:processing will be emitted to show retrying
-          this.emit('deposit:error', error, currentDeposit);
-
           if (attempts + 1 < DepositClient.MAX_SWEEP_RETRIES) {
-            // Still have retries left - clear processingKey so BalanceWatcher
-            // re-detects on next poll, and increment retry counter
+            // Retries left — keep item in "processing" state and retry directly
             this.sweepRetries.set(retryKey, attempts + 1);
-            if (this.balanceWatcher) {
-              this.balanceWatcher.clearProcessingKey(retryKey);
-            }
+            console.log(`[DepositSDK] Scheduling retry in ${DepositClient.SWEEP_RETRY_DELAY_MS}ms`);
+            setTimeout(() => {
+              if (this.status === 'idle') return; // Client was destroyed
+              this.handleDepositDetected(currentDeposit);
+            }, DepositClient.SWEEP_RETRY_DELAY_MS);
           } else {
-            // All retries exhausted - clean up retry tracking
+            // All retries exhausted - emit error and clean up
+            this.emit('deposit:error', error, currentDeposit);
             this.sweepRetries.delete(retryKey);
             this.originalDepositIds.delete(retryKey);
 
@@ -822,13 +826,13 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
               this.handleSweepFailure(currentDeposit, 'sweep_failed');
               return;
             }
-          }
 
-          // Return to watching if still active
-          if (this.balanceWatcher?.isActive()) {
-            this.setStatus('watching');
-          } else {
-            this.setStatus('ready');
+            // Return to watching if still active
+            if (this.balanceWatcher?.isActive()) {
+              this.setStatus('watching');
+            } else {
+              this.setStatus('ready');
+            }
           }
         });
     }

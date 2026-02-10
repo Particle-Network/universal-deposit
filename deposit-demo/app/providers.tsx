@@ -22,9 +22,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
       }}
     >
-      <DepositProvider config={{ autoSweep: false }}>
-        {children}
-      </DepositProvider>
+      <DepositProvider config={{ autoSweep: true }}>{children}</DepositProvider>
     </PrivyProvider>
   );
 }
