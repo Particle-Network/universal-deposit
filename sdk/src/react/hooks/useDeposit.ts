@@ -44,6 +44,10 @@ export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
   const operationRef = useRef<Promise<void> | null>(null);
   const lastAddressRef = useRef<string | undefined>(undefined);
   const pendingAddressRef = useRef<string | undefined>(undefined);
+  // Keep destination in a ref so the connect effect always reads the latest
+  // value without needing it in the dependency array (which would re-trigger connect)
+  const destinationRef = useRef(destination);
+  destinationRef.current = destination;
 
   // Normalize address for comparison
   const normalizeAddress = useCallback((addr: string | undefined): string | undefined => {
@@ -71,7 +75,6 @@ export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
     const handleAddressChange = async () => {
       // If there's a pending operation, wait for it
       if (operationRef.current) {
-        console.log('[useDeposit] ⏳ Waiting for pending operation...');
         await operationRef.current;
       }
 
@@ -80,7 +83,6 @@ export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
 
       // If currently connected to a different address, disconnect first
       if (isConnected && normalizedLast && normalizedLast !== normalizedOwner) {
-        console.log('[useDeposit] 🔄 Address changed from', lastAddressRef.current, 'to', ownerAddress);
 
         const disconnectPromise = disconnect();
         operationRef.current = disconnectPromise;
@@ -93,17 +95,16 @@ export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
       }
 
       // Verify this is still the address we want (no newer change)
-      if (pendingAddressRef.current !== ownerAddress) {
-        console.log('[useDeposit] ⚠️ Address changed again during transition, skipping connect');
-        return;
-      }
+      if (pendingAddressRef.current !== ownerAddress) return;
 
       // Connect to new address (verify it's still defined)
       if (!isConnected && !isConnecting && ownerAddress) {
-        console.log('[useDeposit] 🚀 Connecting to:', ownerAddress);
         lastAddressRef.current = ownerAddress;
 
-        const connectPromise = connect(ownerAddress);
+        // Pass destination so the client is created with the correct
+        // destination from the start, avoiding the race where the first
+        // poll detects existing balances and sweeps to the wrong chain.
+        const connectPromise = connect(ownerAddress, destinationRef.current);
         operationRef.current = connectPromise;
 
         await connectPromise;
@@ -112,7 +113,7 @@ export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
     };
 
     handleAddressChange().catch((err) => {
-      console.error('[useDeposit] ❌ Address change handling failed:', err);
+      console.error('[useDeposit] Address change failed:', err);
       operationRef.current = null;
     });
   }, [ownerAddress, isConnected, isConnecting, connect, disconnect, normalizeAddress]);
@@ -122,8 +123,8 @@ export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
     if (!isReady || !destination) return;
     try {
       setDestination(destination);
-    } catch {
-      // Client may not be ready yet — will be applied on next render
+    } catch (e) {
+      console.warn('[useDeposit] setDestination failed:', e);
     }
   }, [destination?.chainId, destination?.address, isReady, setDestination]);
 

@@ -101,7 +101,7 @@ export interface DepositContextValue {
   intermediaryAddress: string | null;
 
   // Actions
-  connect: (ownerAddress: string) => Promise<void>;
+  connect: (ownerAddress: string, destination?: DestinationConfig) => Promise<void>;
   disconnect: () => Promise<void>;
 
   // Client state
@@ -157,7 +157,17 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
   const ownerAddressRef = useRef<string | null>(null);
   const connectingRef = useRef(false);
   const disconnectingRef = useRef(false);
+  // Prevents concurrent initClient executions during async initialization.
+  // Without this, effect re-fires (from dep changes) can create orphaned
+  // DepositClient instances that keep polling with stale destinations.
+  const clientInitializingRef = useRef(false);
   const connectionLockRef = useRef<Promise<void> | null>(null);
+  // Destination set by useDeposit BEFORE connect(), so initClient picks it up
+  const pendingDestinationRef = useRef<DestinationConfig | undefined>(undefined);
+  // Stable ref for config so initClient doesn't re-fire on every render
+  // when the parent passes a new object literal (e.g. config={{}}).
+  const configRef = useRef(config);
+  configRef.current = config;
   const intermediaryServiceRef = useRef<IntermediaryService>(
     new IntermediaryService({
       projectId: DEFAULT_PROJECT_ID,
@@ -194,6 +204,10 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
   // Refund state
   const [isRefunding, setIsRefunding] = useState(false);
+
+  // Bumped when setDestination is called to force context consumers to
+  // re-render and pick up the fresh currentDestination value.
+  const [, setDestinationVersion] = useState(0);
 
   // Ref to track in-flight recover/bridge operations
   const recoveringIdsRef = useRef<Set<string>>(new Set());
@@ -420,33 +434,14 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
   // Handle Auth Core already being connected (persisted session)
   useEffect(() => {
-    console.log("[DepositSDK] 👀 Auth Core state check on mount:", {
-      authCoreConnected,
-      authCoreAddress,
-      hasProvider: !!authCoreProvider,
-    });
-
-    // If Auth Core is already connected (persisted session), we need to handle it
     if (authCoreConnected && authCoreAddress && authCoreProvider) {
-      console.log(
-        "[DepositSDK] 🔄 Auth Core already connected (persisted session):",
-        authCoreAddress
-      );
+      console.log("[DepositSDK] Auth Core already connected (persisted session)");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run on mount
 
   // Set isConnected when Auth Core connects
   useEffect(() => {
-    console.log("[DepositSDK] 👀 Auth Core state changed:", {
-      authCoreConnected,
-      authCoreAddress,
-      hasProvider: !!authCoreProvider,
-      ownerAddress: ownerAddressRef.current,
-      isConnected,
-      isConnecting,
-    });
-
     if (
       authCoreConnected &&
       authCoreAddress &&
@@ -454,10 +449,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       ownerAddressRef.current
     ) {
       if (!isConnected) {
-        console.log(
-          "[DepositSDK] ✅ Step 3: Auth Core connected! Address:",
-          authCoreAddress
-        );
+        console.log("[DepositSDK] Auth Core connected:", authCoreAddress);
         setIsConnected(true);
         setIsConnecting(false);
         connectingRef.current = false;
@@ -471,25 +463,19 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     isConnecting,
   ]);
 
-  // Initialize client after Auth Core connection
+  // Initialize client after Auth Core connection.
+  // Uses configRef (stable ref) instead of config (unstable object) to
+  // prevent the effect from re-firing on every parent render. The
+  // clientInitializingRef guard prevents concurrent async executions from
+  // creating orphaned DepositClient instances with stale destinations.
   useEffect(() => {
+    let aborted = false;
+
     const initClient = async () => {
       const currentOwner = ownerAddressRef.current;
 
-      console.log("[DepositSDK] 🔄 initClient check:", {
-        authCoreConnected,
-        authCoreAddress,
-        hasProvider: !!authCoreProvider,
-        ownerAddress: currentOwner,
-        hasClient: !!clientRef.current,
-        isDisconnecting: disconnectingRef.current,
-      });
-
       // Skip if disconnecting
-      if (disconnectingRef.current) {
-        console.log("[DepositSDK] ⏭️ initClient skipped - disconnecting");
-        return;
-      }
+      if (disconnectingRef.current) return;
 
       if (
         !authCoreConnected ||
@@ -497,26 +483,32 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
         !authCoreProvider ||
         !currentOwner
       ) {
-        console.log(
-          "[DepositSDK] ⏭️ initClient skipped - missing requirements"
-        );
         return;
       }
 
-      // Already have a client - verify it's for the same owner
+      // Already have a live client - verify it's for the same owner
       if (clientRef.current) {
-        const existingConfig = clientRef.current.getConfig();
-        if (existingConfig.ownerAddress.toLowerCase() === currentOwner.toLowerCase()) {
-          console.log(
-            "[DepositSDK] ⏭️ initClient skipped - client already exists for this owner"
-          );
-          return;
+        if (clientRef.current.isDestroyed()) {
+          // Previous client was destroyed (e.g. unmount) — clear ref and fall through
+          clientRef.current = null;
+        } else {
+          const existingConfig = clientRef.current.getConfig();
+          if (existingConfig.ownerAddress.toLowerCase() === currentOwner.toLowerCase()) {
+            return;
+          }
+          // Different owner - destroy old client first
+          clientRef.current.destroy();
+          clientRef.current = null;
         }
-        // Different owner - destroy old client first
-        console.log("[DepositSDK] 🔄 Owner changed, destroying old client");
-        clientRef.current.destroy();
-        clientRef.current = null;
       }
+
+      // Prevent concurrent initialization — without this guard, effect
+      // re-fires during the async gap (before clientRef.current is set)
+      // would create multiple DepositClient instances.
+      if (clientInitializingRef.current) {
+        return;
+      }
+      clientInitializingRef.current = true;
 
       try {
         // Validate blind signing eligibility before proceeding
@@ -538,18 +530,11 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
           }
         }
 
-        console.log("[DepositSDK] Step 4: Creating DepositClient...");
-        console.log("[DepositSDK] Config:", {
-          ownerAddress: currentOwner,
-          intermediaryAddress: authCoreAddress,
-          destinationChainId:
-            config.destination?.chainId ?? DEFAULT_DESTINATION_CHAIN_ID,
-          autoSweep: config.autoSweep ?? true,
-          blindSigningEligible: securityAccount
-            ? !securityAccount.has_set_payment_password && !securityAccount.has_set_master_password
-            : "unknown",
-        });
-
+        // Use pending destination from useDeposit hook if available,
+        // falling back to provider config, then SDK default.
+        // Read from configRef (stable) to avoid stale closure issues.
+        const cfg = configRef.current;
+        const pendingDest = pendingDestinationRef.current;
         const client = new DepositClient({
           ownerAddress: currentOwner,
           intermediaryAddress: authCoreAddress,
@@ -558,103 +543,105 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
               authCoreProvider.signMessage(message),
           },
           destination: {
-            chainId: config.destination?.chainId ?? DEFAULT_DESTINATION_CHAIN_ID,
-            address: config.destination?.address,
+            chainId: pendingDest?.chainId ?? cfg.destination?.chainId ?? DEFAULT_DESTINATION_CHAIN_ID,
+            address: pendingDest?.address ?? cfg.destination?.address,
           },
-          supportedTokens: config.supportedTokens,
-          supportedChains: config.supportedChains,
-          autoSweep: config.autoSweep ?? true,
-          minValueUSD: config.minValueUSD,
-          pollingIntervalMs: config.pollingIntervalMs,
-          refund: config.refund,
+          supportedTokens: cfg.supportedTokens,
+          supportedChains: cfg.supportedChains,
+          autoSweep: cfg.autoSweep ?? true,
+          minValueUSD: cfg.minValueUSD,
+          pollingIntervalMs: cfg.pollingIntervalMs,
+          refund: cfg.refund,
         });
 
         setupClientListeners(client);
 
-        console.log(
-          "[DepositSDK] 🔄 Step 5: Initializing client (UA setup)..."
-        );
+        console.log("[DepositSDK] Initializing client for", currentOwner.slice(0, 8) + "...");
         await client.initialize();
 
-        // Verify owner hasn't changed during async initialization
-        if (ownerAddressRef.current?.toLowerCase() !== currentOwner.toLowerCase()) {
-          console.warn("[DepositSDK] ⚠️ Owner changed during initialization, destroying client");
+        // Effect was cleaned up while we were awaiting — destroy the orphan
+        if (aborted) {
+          console.warn("[DepositSDK] Effect aborted during init, destroying orphaned client");
           client.destroy();
           return;
         }
 
-        console.log("[DepositSDK] 📍 Step 6: Getting deposit addresses...");
+        // Verify owner hasn't changed or disconnect started during async init
+        if (
+          disconnectingRef.current ||
+          ownerAddressRef.current?.toLowerCase() !== currentOwner.toLowerCase()
+        ) {
+          console.warn("[DepositSDK] Owner changed during initialization, destroying client");
+          client.destroy();
+          return;
+        }
+
         const addresses = await client.getDepositAddresses();
-        console.log("[DepositSDK] Deposit addresses:", addresses);
+
+        // Check abort again after second await
+        if (aborted) {
+          console.warn("[DepositSDK] Effect aborted after getDepositAddresses, destroying orphaned client");
+          client.destroy();
+          return;
+        }
+
         setDepositAddresses(addresses);
 
-        // Auto-start watching
-        console.log("[DepositSDK] 👁️ Step 7: Starting balance watcher...");
         client.startWatching();
 
         clientRef.current = client;
         setIsReady(true);
         setIsConnecting(false);
 
-        console.log("[DepositSDK] ✅ All steps complete! SDK is ready.");
+        console.log("[DepositSDK] Ready. EVM:", addresses.evm.slice(0, 10) + "...");
       } catch (err) {
-        console.error("[DepositSDK] ❌ Failed to initialize client:", err);
+        console.error("[DepositSDK] Failed to initialize client:", err);
         setError(err instanceof Error ? err : new Error(String(err)));
         setIsConnecting(false);
+      } finally {
+        clientInitializingRef.current = false;
       }
     };
 
     initClient();
+
+    // Cleanup: mark aborted so any in-flight init destroys its client
+    return () => {
+      aborted = true;
+    };
+    // NOTE: `config` and `isConnected` are intentionally excluded from deps.
+    // - `config` is read via configRef to avoid re-firing on every parent
+    //   render (object literals create new references each time).
+    // - `isConnected` is derived from auth core state already in deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     authCoreConnected,
     authCoreAddress,
     authCoreProvider,
-    isConnected,
-    config,
     setupClientListeners,
   ]);
 
   const connect = useCallback(
-    async (ownerAddress: string) => {
-      console.log("[DepositSDK] 🔌 connect() called with:", ownerAddress);
-      console.log("[DepositSDK] Current state:", {
-        connectingRef: connectingRef.current,
-        disconnectingRef: disconnectingRef.current,
-        isConnecting,
-        isConnected,
-        authCoreConnected,
-        authCoreAddress,
-        hasProvider: !!authCoreProvider,
-        currentOwner: ownerAddressRef.current,
-      });
+    async (ownerAddress: string, destination?: DestinationConfig) => {
+      // Store destination so initClient picks it up when creating DepositClient
+      if (destination) {
+        pendingDestinationRef.current = destination;
+      }
+      console.log("[DepositSDK] Connecting:", ownerAddress.slice(0, 10) + "...");
 
       // Wait for any pending connection/disconnection to complete
       if (connectionLockRef.current) {
-        console.log("[DepositSDK] ⏳ Waiting for pending operation to complete...");
         await connectionLockRef.current;
       }
 
       // Use ref to prevent multiple simultaneous calls
-      if (connectingRef.current || isConnecting) {
-        console.log(
-          "[DepositSDK] ⏭️ Connect skipped - already connecting"
-        );
-        return;
-      }
+      if (connectingRef.current || isConnecting) return;
 
       // If already connected with same address, skip
-      if (isConnected && ownerAddressRef.current?.toLowerCase() === ownerAddress.toLowerCase()) {
-        console.log(
-          "[DepositSDK] ⏭️ Connect skipped - already connected with same address"
-        );
-        return;
-      }
+      if (isConnected && ownerAddressRef.current?.toLowerCase() === ownerAddress.toLowerCase()) return;
 
       // If connected with different address, disconnect first
       if (isConnected && ownerAddressRef.current && ownerAddressRef.current.toLowerCase() !== ownerAddress.toLowerCase()) {
-        console.log(
-          "[DepositSDK] 🔄 Different address detected, disconnecting first..."
-        );
         // Recursive call will happen after disconnect completes via useDeposit hook
         return;
       }
@@ -666,21 +653,15 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
         try {
           const session = await intermediaryServiceRef.current.getSession(ownerAddress);
           if (session.intermediaryAddress.toLowerCase() === authCoreAddress.toLowerCase()) {
-            console.log(
-              "[DepositSDK] Auth Core already connected with matching intermediary, reusing connection"
-            );
+            console.log("[DepositSDK] Reusing existing Auth Core session");
             ownerAddressRef.current = ownerAddress;
             setIsConnected(true);
             return;
           }
-          // Intermediary mismatch - persisted session is for a different user
-          console.warn(
-            "[DepositSDK] Persisted Auth Core session belongs to a different intermediary. " +
-            `Expected: ${session.intermediaryAddress}, Got: ${authCoreAddress}. Reconnecting...`
-          );
+          console.warn("[DepositSDK] Session mismatch, reconnecting...");
           await authCoreDisconnect();
         } catch (err) {
-          console.warn("[DepositSDK] Failed to validate persisted session, reconnecting:", err);
+          console.warn("[DepositSDK] Session validation failed, reconnecting:", err);
           await authCoreDisconnect();
         }
       }
@@ -697,9 +678,6 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       });
 
       try {
-        console.log("[DepositSDK] 📡 Step 1: Fetching JWT from worker...");
-        console.log("[DepositSDK] JWT URL:", DEFAULT_JWT_SERVICE_URL);
-
         // Fetch JWT from worker (per-user cached)
         const session = await intermediaryServiceRef.current.getSession(
           ownerAddress
@@ -707,39 +685,23 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
         // Verify we're still connecting the same address (no race condition)
         if (ownerAddressRef.current?.toLowerCase() !== ownerAddress.toLowerCase()) {
-          console.warn("[DepositSDK] ⚠️ Address changed during connection, aborting");
+          console.warn("[DepositSDK] Address changed during connection, aborting");
           return;
         }
 
-        console.log("[DepositSDK] ✅ Step 1 Complete: JWT received");
-        console.log(
-          "[DepositSDK] Intermediary address:",
-          session.intermediaryAddress
-        );
-
-        console.log(
-          "[DepositSDK] 🔐 Step 2: Connecting to Auth Core with JWT..."
-        );
+        console.log("[DepositSDK] JWT received, connecting Auth Core...");
 
         // Connect to Auth Core with JWT
         // The useEffect will handle client initialization when authCoreConnected becomes true
-        const result = await authCoreConnect({
+        await authCoreConnect({
           provider: AuthType.jwt,
           thirdpartyCode: session.jwt,
         });
 
-        console.log(
-          "[DepositSDK] ✅ Step 2 Complete: authCoreConnect returned:",
-          result
-        );
-        console.log("[DepositSDK] Waiting for Auth Core hooks to update...");
-
         // Set a timeout to reset isConnecting if Auth Core hooks don't update
         setTimeout(() => {
           if (connectingRef.current && !authCoreConnected) {
-            console.warn(
-              "[DepositSDK] ⚠️ Auth Core hooks didn't update after 10s, resetting state"
-            );
+            console.warn("[DepositSDK] Auth Core hooks didn't update after 10s, resetting state");
             setIsConnecting(false);
             connectingRef.current = false;
           }
@@ -747,7 +709,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
         // Don't set isConnected here - let the useEffect handle it when authCoreConnected changes
       } catch (err) {
-        console.error("[DepositSDK] ❌ Connection failed:", err);
+        console.error("[DepositSDK] Connection failed:", err);
         // Clear session for this user on error to allow retry
         intermediaryServiceRef.current.clearSessionForUser(ownerAddress);
         setError(err instanceof Error ? err : new Error(String(err)));
@@ -884,14 +846,10 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
   const disconnect = useCallback(async () => {
     // Prevent concurrent disconnect calls
-    if (disconnectingRef.current) {
-      console.log("[DepositSDK] ⏭️ Disconnect skipped - already disconnecting");
-      return;
-    }
+    if (disconnectingRef.current) return;
 
     // Wait for any pending connection to complete first
     if (connectionLockRef.current) {
-      console.log("[DepositSDK] ⏳ Waiting for pending connection to complete before disconnect...");
       await connectionLockRef.current;
     }
 
@@ -905,7 +863,10 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
     try {
       const previousOwner = ownerAddressRef.current;
-      console.log("[DepositSDK] 🔌 Disconnecting user:", previousOwner);
+      console.log("[DepositSDK] Disconnecting");
+
+      // Allow any in-flight initClient to detect disconnect and self-destruct
+      clientInitializingRef.current = false;
 
       if (clientRef.current) {
         clientRef.current.destroy();
@@ -932,7 +893,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       setError(null);
       connectingRef.current = false;
 
-      console.log("[DepositSDK] ✅ Disconnect complete");
+      console.log("[DepositSDK] Disconnected");
     } finally {
       disconnectingRef.current = false;
       resolveLock!();
@@ -960,10 +921,14 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
   }, []);
 
   const setDestination = useCallback((destination: DestinationConfig) => {
+    // Always keep the ref in sync so future reconnections use the latest destination
+    pendingDestinationRef.current = destination;
     if (!clientRef.current) {
       throw new Error("Client not initialized");
     }
     clientRef.current.setDestination(destination);
+    // Force context consumers to re-render with fresh currentDestination
+    setDestinationVersion((v) => v + 1);
   }, []);
 
   const getCurrentDestination = useCallback((): { address: string; chainId: number } | null => {
@@ -1051,6 +1016,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     return () => {
       if (clientRef.current) {
         clientRef.current.destroy();
+        clientRef.current = null;
       }
     };
   }, []);

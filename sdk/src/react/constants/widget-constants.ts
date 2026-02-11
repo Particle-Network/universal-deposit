@@ -54,6 +54,7 @@ export interface ChainOption {
 }
 
 export const CHAIN_OPTIONS: ChainOption[] = [
+  { id: CHAIN.SOLANA, name: "Solana", color: "#9945ff", addressType: "solana" },
   { id: CHAIN.ETHEREUM, name: "Ethereum", color: "#627eea", addressType: "evm" },
   { id: CHAIN.BNB, name: "BNB Chain", color: "#f3ba2f", addressType: "evm" },
   { id: CHAIN.MANTLE, name: "Mantle", color: "#000000", addressType: "evm" },
@@ -70,7 +71,6 @@ export const CHAIN_OPTIONS: ChainOption[] = [
   { id: CHAIN.LINEA, name: "Linea", color: "#121212", addressType: "evm" },
   { id: CHAIN.SONIC, name: "Sonic", color: "#1969ff", addressType: "evm" },
   { id: CHAIN.MERLIN, name: "Merlin", color: "#f7931a", addressType: "evm" },
-  { id: CHAIN.SOLANA, name: "Solana", color: "#9945ff", addressType: "solana" },
 ];
 
 export const CHAIN_SUPPORTED_TOKENS: Record<number, TokenType[]> = {
@@ -92,3 +92,18 @@ export const CHAIN_SUPPORTED_TOKENS: Record<number, TokenType[]> = {
   [CHAIN.POLYGON]: ["USDC", "USDT", "ETH", "BTC"],
   [CHAIN.MERLIN]: ["BTC"],
 };
+
+export const TOKEN_SUPPORTED_CHAINS: Record<TokenType, number[]> =
+  Object.entries(CHAIN_SUPPORTED_TOKENS).reduce(
+    (acc, [chainIdStr, tokens]) => {
+      const chainId = Number(chainIdStr);
+      return tokens.reduce(
+        (innerAcc, token) => ({
+          ...innerAcc,
+          [token]: [...(innerAcc[token as TokenType] || []), chainId],
+        }),
+        acc,
+      );
+    },
+    {} as Record<TokenType, number[]>,
+  );

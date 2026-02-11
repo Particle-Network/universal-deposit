@@ -67,7 +67,7 @@
   "dependencies": {
     "@particle-network/auth-core": "^2.1.1",
     "@particle-network/auth-core-modal": "^1.5.2",
-    "@particle-network/universal-account-sdk": "^1.0.25",
+    "@particle-network/universal-account-sdk": "^1.0.26",
     "clsx": "^2.1.1",
     "lucide-react": "^0.562.0",
     "qrcode.react": "^4.2.0",

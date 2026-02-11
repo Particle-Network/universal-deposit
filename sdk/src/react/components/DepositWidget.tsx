@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { X, Copy, QrCode, Check, Clock, AlertCircle, AlertTriangle, ArrowRight } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { cn } from "../utils/cn";
@@ -20,6 +20,7 @@ import {
   LOGO_URLS,
   CHAIN_OPTIONS,
   CHAIN_SUPPORTED_TOKENS,
+  TOKEN_SUPPORTED_CHAINS,
 } from "../constants/widget-constants";
 
 export interface DepositWidgetProps {
@@ -104,11 +105,26 @@ export function DepositWidget({
 
   const availableTokens = CHAIN_SUPPORTED_TOKENS[selectedChain.id] || [];
 
+  const availableChains = useMemo(() => {
+    const supportedChainIds = TOKEN_SUPPORTED_CHAINS[selectedToken] || [];
+    return CHAIN_OPTIONS.filter((chain) => supportedChainIds.includes(chain.id));
+  }, [selectedToken]);
+
   useEffect(() => {
     if (!availableTokens.includes(selectedToken)) {
       setSelectedToken(availableTokens[0]);
     }
   }, [selectedChain, selectedToken, availableTokens]);
+
+  useEffect(() => {
+    const supportedChainIds = TOKEN_SUPPORTED_CHAINS[selectedToken] || [];
+    if (!supportedChainIds.includes(selectedChain.id)) {
+      const firstAvailable = CHAIN_OPTIONS.find((c) => supportedChainIds.includes(c.id));
+      if (firstAvailable) {
+        setSelectedChain(firstAvailable);
+      }
+    }
+  }, [selectedToken, selectedChain.id]);
   const [showQR, setShowQR] = useState(false);
   const [copied, setCopied] = useState(false);
   const [depositAddress, setDepositAddress] = useState<string>("");
@@ -148,9 +164,8 @@ export function DepositWidget({
     if (destinationProp) {
       try {
         client.setDestination(destinationProp);
-      } catch {
-        // Silently fail - client keeps previous destination
-        // Consumer can validate destination before passing to avoid this
+      } catch (e) {
+        console.warn('[DepositWidget] setDestination failed:', e);
       }
     }
 
@@ -660,7 +675,7 @@ export function DepositWidget({
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {CHAIN_OPTIONS.map((chain) => (
+                {availableChains.map((chain) => (
                   <button
                     key={chain.id}
                     onClick={() => {
@@ -833,12 +848,20 @@ export function DepositWidget({
                       theme === "dark" ? "text-[#71717a]" : "text-gray-500",
                     )}
                   >
-                    Bridge To
+                    You will receive
                   </span>
-                  <span className="text-[13px] font-medium">
-                    {getChainName(currentDestination.chainId) ||
-                      `Chain ${currentDestination.chainId}`}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <img
+                      src={LOGO_URLS["USDC"]}
+                      alt="USDC"
+                      className="w-[14px] h-[14px] rounded-full"
+                    />
+                    <span className="text-[13px] font-medium">
+                      USDC on{" "}
+                      {getChainName(currentDestination.chainId) ||
+                        `Chain ${currentDestination.chainId}`}
+                    </span>
+                  </div>
                 </div>
               </div>
               <div className="text-right">

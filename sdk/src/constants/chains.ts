@@ -25,13 +25,14 @@ export const CHAIN = {
 export type ChainId = (typeof CHAIN)[keyof typeof CHAIN];
 
 export const CHAIN_META: Record<number, { name: string; addressType: 'evm' | 'solana' }> = {
-  [CHAIN.ETHEREUM]: { name: 'Ethereum', addressType: 'evm' },
+  [CHAIN.SOLANA]: { name: 'Solana', addressType: 'solana' },
   [CHAIN.OPTIMISM]: { name: 'Optimism', addressType: 'evm' },
   [CHAIN.BNB]: { name: 'BNB Chain', addressType: 'evm' },
   [CHAIN.POLYGON]: { name: 'Polygon', addressType: 'evm' },
   [CHAIN.BASE]: { name: 'Base', addressType: 'evm' },
   [CHAIN.ARBITRUM]: { name: 'Arbitrum', addressType: 'evm' },
   [CHAIN.AVALANCHE]: { name: 'Avalanche', addressType: 'evm' },
+  [CHAIN.ETHEREUM]: { name: 'Ethereum', addressType: 'evm' },
   [CHAIN.LINEA]: { name: 'Linea', addressType: 'evm' },
   [CHAIN.HYPERVM]: { name: 'HyperEVM', addressType: 'evm' },
   [CHAIN.MANTLE]: { name: 'Mantle', addressType: 'evm' },
@@ -41,10 +42,11 @@ export const CHAIN_META: Record<number, { name: string; addressType: 'evm' | 'so
   [CHAIN.SONIC]: { name: 'Sonic', addressType: 'evm' },
   [CHAIN.PLASMA]: { name: 'Plasma', addressType: 'evm' },
   [CHAIN.BERACHAIN]: { name: 'Berachain', addressType: 'evm' },
-  [CHAIN.SOLANA]: { name: 'Solana', addressType: 'solana' },
+
 };
 
 export const DEFAULT_SUPPORTED_CHAINS = [
+    CHAIN.SOLANA,
   CHAIN.ETHEREUM,
   CHAIN.OPTIMISM,
   CHAIN.BNB,
@@ -61,7 +63,7 @@ export const DEFAULT_SUPPORTED_CHAINS = [
   CHAIN.SONIC,
   CHAIN.PLASMA,
   CHAIN.BERACHAIN,
-  CHAIN.SOLANA,
+
 ];
 
 /**

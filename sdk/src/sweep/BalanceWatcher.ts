@@ -8,7 +8,7 @@
 import type { UAManager, PrimaryAssetsResponse } from '../universal-account';
 import type { DetectedDeposit, TokenType } from '../core/types';
 import { TypedEventEmitter } from '../core/EventEmitter';
-import { meetsMinimumDeposit } from '../constants/tokens';
+import { meetsMinimumDeposit, isAboveDustThreshold } from '../constants/tokens';
 
 export interface BalanceSnapshot {
   balances: Map<string, bigint>;
@@ -46,6 +46,10 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
   // Track emitted below-threshold keys to prevent duplicate events
   private belowThresholdKeys: Set<string> = new Set();
   private initialCheckDone = false;
+  // When true, polling continues (to keep snapshots fresh) but no
+  // deposit:detected events are emitted. This prevents phantom deposits
+  // during sweeps when the UA SDK moves funds across chains internally.
+  private detectionSuppressed = false;
 
   constructor(config: BalanceWatcherConfig) {
     super();
@@ -91,6 +95,22 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
    */
   isActive(): boolean {
     return this.isWatching;
+  }
+
+  /**
+   * Suppress deposit detection while a sweep is in progress.
+   * Polling continues so snapshots stay fresh, but no deposit:detected
+   * events are emitted. Call resumeDetection() when the sweep finishes.
+   */
+  suppressDetection(): void {
+    this.detectionSuppressed = true;
+  }
+
+  /**
+   * Resume deposit detection after a sweep completes.
+   */
+  resumeDetection(): void {
+    this.detectionSuppressed = false;
   }
 
   /**
@@ -160,7 +180,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
         const rawAmount = this.parseBigInt(chain.rawAmount);
         const valueUSD = Number(chain.amountInUSD || 0);
 
-        if (rawAmount > 0n && meetsMinimumDeposit(rawAmount, tokenType, chainId)) {
+        if (rawAmount > 0n && isAboveDustThreshold(valueUSD) && meetsMinimumDeposit(rawAmount, tokenType, chainId)) {
           deposits.push({
             id: `${tokenType}:${chainId}:${Date.now()}`,
             token: tokenType.toUpperCase() as TokenType,
@@ -193,24 +213,20 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
   private async poll(): Promise<void> {
     try {
       const primaryAssets = await this.config.uaManager.getPrimaryAssets();
-      
-      console.log('[BalanceWatcher] Raw primary assets:', JSON.stringify(primaryAssets, null, 2));
-      
       const currentSnapshot = this.extractSnapshot(primaryAssets);
-      
-      console.log('[BalanceWatcher] Snapshot balances:', 
-        Array.from(currentSnapshot.balances.entries()).map(([k, v]) => `${k}: ${v.toString()}`));
 
       // First poll - check for existing balances
       if (!this.initialCheckDone) {
         this.initialCheckDone = true;
-        await this.checkExistingBalances(currentSnapshot);
+        if (!this.detectionSuppressed) {
+          await this.checkExistingBalances(currentSnapshot);
+        }
         this.lastSnapshot = currentSnapshot;
         return;
       }
 
-      // Subsequent polls - detect changes
-      if (this.lastSnapshot) {
+      // Subsequent polls - detect changes (skip emission when suppressed)
+      if (this.lastSnapshot && !this.detectionSuppressed) {
         this.cleanupStaleProcessingKeys();
         const deposits = this.detectChanges(this.lastSnapshot, currentSnapshot);
         for (const deposit of deposits) {
@@ -223,6 +239,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
         }
       }
 
+      // Always update snapshot so next poll compares against fresh data
       this.lastSnapshot = currentSnapshot;
     } catch (error) {
       console.warn('[BalanceWatcher] Polling error:', error);
@@ -234,37 +251,22 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
    * Check for existing balances on first poll
    */
   private async checkExistingBalances(snapshot: BalanceSnapshot): Promise<void> {
-    console.log('[BalanceWatcher] Checking for existing balances...');
-    console.log('[BalanceWatcher] Config:', {
-      supportedTokens: this.config.supportedTokens,
-      supportedChains: this.config.supportedChains,
-      minValueUSD: this.config.minValueUSD,
-    });
-
     for (const [key, amount] of snapshot.balances.entries()) {
       const valueUSD = snapshot.usdValues.get(key) || 0;
-      
-      console.log(`[BalanceWatcher] Checking ${key}: amount=${amount}, valueUSD=${valueUSD}`);
 
       const [tokenType, chainIdStr] = key.split(':');
       const chainId = Number(chainIdStr);
 
-      if (!this.config.supportedTokens.includes(tokenType.toUpperCase())) {
-        console.log(`[BalanceWatcher] ${tokenType} not in supported tokens`);
-        continue;
-      }
-      if (!this.config.supportedChains.includes(chainId)) {
-        console.log(`[BalanceWatcher] Chain ${chainId} not in supported chains`);
-        continue;
-      }
+      if (!this.config.supportedTokens.includes(tokenType.toUpperCase())) continue;
+      if (!this.config.supportedChains.includes(chainId)) continue;
+
+      // Skip dust — residual amounts from partial sweeps
+      if (amount > 0n && !isAboveDustThreshold(valueUSD)) continue;
 
       if (amount > 0n && meetsMinimumDeposit(amount, tokenType, chainId)) {
-        if (this.processingKeys.has(key)) {
-          console.log(`[BalanceWatcher] ${key} already processing, skipping`);
-          continue;
-        }
+        if (this.processingKeys.has(key)) continue;
 
-        console.log(`[BalanceWatcher] Found existing ${tokenType} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
+        console.log(`[BalanceWatcher] Existing balance: ${tokenType.toUpperCase()} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
 
         this.processingKeys.set(key, Date.now());
         this.emit('deposit:detected', {
@@ -279,7 +281,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
       } else if (amount > 0n && !meetsMinimumDeposit(amount, tokenType, chainId)) {
         if (this.belowThresholdKeys.has(key)) continue;
 
-        console.log(`[BalanceWatcher] Below-threshold deposit: ${tokenType} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
+        console.log(`[BalanceWatcher] Below threshold: ${tokenType.toUpperCase()} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
 
         this.belowThresholdKeys.add(key);
         this.emit('deposit:below_threshold', {
@@ -348,9 +350,12 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
 
       const deltaAmount = currentAmount - prevAmount;
 
+      // Skip dust — residual amounts from partial sweeps
+      if (!isAboveDustThreshold(valueUSD)) continue;
+
       // Only detect increases above per-token minimum
       if (meetsMinimumDeposit(deltaAmount, tokenType, chainId)) {
-        console.log(`[BalanceWatcher] Detected deposit: ${tokenType} on chain ${chainId}, delta: ${deltaAmount}`);
+        console.log(`[BalanceWatcher] New deposit: ${tokenType.toUpperCase()} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
 
         deposits.push({
           id: `${key}:${Date.now()}`,
@@ -363,8 +368,6 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
         });
       } else {
         if (this.belowThresholdKeys.has(key)) continue;
-
-        console.log(`[BalanceWatcher] Below-threshold deposit: ${tokenType} on chain ${chainId}, delta: ${deltaAmount}`);
 
         this.belowThresholdKeys.add(key);
         this.emit('deposit:below_threshold', {

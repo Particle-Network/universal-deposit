@@ -65,10 +65,6 @@ export class UAManager {
     }
 
     try {
-      // Create UA instance using the intermediary address (from JWT)
-      // The intermediary address is the "owner" of the UA
-      console.log('[UAManager] Creating UA with intermediary address:', this.config.session.intermediaryAddress);
-      
       this.ua = new UniversalAccount({
         projectId: DEFAULT_PROJECT_ID,
         projectClientKey: DEFAULT_CLIENT_KEY,
@@ -89,12 +85,6 @@ export class UAManager {
       };
 
       this.initialized = true;
-
-      console.log('[UAManager] Initialized:', {
-        intermediaryAddress: this.config.session.intermediaryAddress,
-        evmDepositAddress: this.depositAddresses.evm,
-        solanaDepositAddress: this.depositAddresses.solana,
-      });
     } catch (error) {
       throw new UniversalAccountError(
         `Failed to initialize Universal Account: ${error instanceof Error ? error.message : 'Unknown error'}`,

@@ -54,7 +54,6 @@ vi.mock('../intermediary', () => ({
 describe('Auto-Refund', () => {
   let client: DepositClient;
   let mockUAManager: any;
-  let mockSweeper: any;
   let mockRefundService: any;
 
   const createMockDeposit = (overrides: Partial<DetectedDeposit> = {}): DetectedDeposit => ({
@@ -108,9 +107,6 @@ describe('Auto-Refund', () => {
     await client.initialize();
 
     // Get mock instances
-    const { Sweeper } = await import('../sweep');
-    mockSweeper = (Sweeper as any).mock.results[0]?.value;
-
     const { RefundService } = await import('../refund');
     mockRefundService = (RefundService as any).mock.results[0]?.value;
   });

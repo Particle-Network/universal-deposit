@@ -22,21 +22,10 @@ import {
   DepositWidget,
   RecoveryModal,
   CHAIN,
-  getChainName,
 } from "@particle-network/deposit-sdk/react";
 import { UniversalBalance } from "./UniversalBalance";
 import { HeadlessDemo } from "./HeadlessDemo";
 import { CodePanel, CODE_EXAMPLES } from "./CodePanel";
-
-// Destination chains available for selection
-const CHAINS = [
-  { id: CHAIN.ARBITRUM, name: "Arbitrum", desc: "Fast & cheap" },
-  { id: CHAIN.BASE, name: "Base", desc: "Coinbase L2" },
-  { id: CHAIN.ETHEREUM, name: "Ethereum", desc: "Mainnet" },
-  { id: CHAIN.POLYGON, name: "Polygon", desc: "Low fees" },
-  { id: CHAIN.OPTIMISM, name: "Optimism", desc: "OP Stack" },
-  { id: CHAIN.BNB, name: "BNB Chain", desc: "BSC" },
-];
 
 type DisplayMode = "modal" | "inline" | "headless";
 
@@ -51,9 +40,6 @@ export function DepositDemo() {
   // Display mode
   const [displayMode, setDisplayMode] = useState<DisplayMode>("modal");
 
-  // Chain selection - default to Arbitrum
-  const [selectedChainId, setSelectedChainId] = useState<number>(CHAIN.ARBITRUM);
-
   // Get user's embedded wallet from Privy
   const embeddedWallet = getEmbeddedConnectedWallet(wallets);
   const ownerAddress = embeddedWallet?.address;
@@ -62,10 +48,10 @@ export function DepositDemo() {
   const isWalletReady = authenticated && !!ownerAddress;
   const isWalletPending = authenticated && !ownerAddress;
 
-  // Initialize SDK with owner address and sync destination chain
+  // Initialize SDK with owner address — destination is fixed to Polygon
   const { isConnecting, isReady, error, disconnect } = useDeposit({
     ownerAddress: isWalletReady ? ownerAddress : undefined,
-    destination: { chainId: selectedChainId },
+    destination: { chainId: CHAIN.POLYGON },
   });
 
   // Wallet creation timeout handling
@@ -83,8 +69,6 @@ export function DepositDemo() {
     await disconnect();
     logout();
   };
-
-  const selectedChain = CHAINS.find((c) => c.id === selectedChainId);
 
   // Get appropriate code examples based on mode
   const getCodeExamples = () => {
@@ -117,7 +101,8 @@ export function DepositDemo() {
                 Get Started
               </h2>
               <p className="text-zinc-400 mb-6 max-w-md mx-auto">
-                Connect your wallet to explore the Deposit SDK demo. See how easy it is to accept deposits from any chain.
+                Connect your wallet to explore the Deposit SDK demo. See how
+                easy it is to accept deposits from any chain.
               </p>
               <button
                 onClick={login}
@@ -130,9 +115,17 @@ export function DepositDemo() {
 
           {/* Show code examples even when not logged in */}
           <div className="mt-8">
-            <h2 className="text-lg font-semibold text-white mb-4">Quick Start</h2>
+            <h2 className="text-lg font-semibold text-white mb-4">
+              Quick Start
+            </h2>
             <div className="h-96">
-              <CodePanel examples={[CODE_EXAMPLES.setup, CODE_EXAMPLES.modal, CODE_EXAMPLES.headless]} />
+              <CodePanel
+                examples={[
+                  CODE_EXAMPLES.setup,
+                  CODE_EXAMPLES.modal,
+                  CODE_EXAMPLES.headless,
+                ]}
+              />
             </div>
           </div>
         </div>
@@ -149,9 +142,15 @@ export function DepositDemo() {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4 p-4 bg-zinc-900 rounded-xl border border-zinc-800">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${isReady ? "bg-green-500" : isConnecting ? "bg-yellow-500 animate-pulse" : "bg-zinc-500"}`} />
+              <div
+                className={`w-2 h-2 rounded-full ${isReady ? "bg-green-500" : isConnecting ? "bg-yellow-500 animate-pulse" : "bg-zinc-500"}`}
+              />
               <span className="text-sm text-zinc-400">
-                {isReady ? "SDK Ready" : isConnecting ? "Connecting..." : "Disconnected"}
+                {isReady
+                  ? "SDK Ready"
+                  : isConnecting
+                    ? "Connecting..."
+                    : "Disconnected"}
               </span>
             </div>
             <div className="h-4 w-px bg-zinc-700" />
@@ -186,7 +185,10 @@ export function DepositDemo() {
         {isWalletPending && walletTimeout && (
           <div className="mb-6 p-4 bg-red-900/20 border border-red-500/30 rounded-lg">
             <p className="text-red-400 text-sm mb-2">Wallet creation stuck</p>
-            <button onClick={logout} className="text-sm text-red-400 underline hover:text-red-300">
+            <button
+              onClick={logout}
+              className="text-sm text-red-400 underline hover:text-red-300"
+            >
               Reset and try again
             </button>
           </div>
@@ -206,35 +208,42 @@ export function DepositDemo() {
               {/* Universal Balance */}
               <UniversalBalance ownerAddress={ownerAddress} />
 
-              {/* Chain Selection */}
+              {/* Destination Chain */}
               <div className="bg-zinc-900 rounded-xl p-4 border border-zinc-800">
-                <h3 className="text-sm font-semibold text-white mb-1">Destination Chain</h3>
-                <p className="text-zinc-500 text-xs mb-3">Where deposits are sent</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {CHAINS.map((chain) => (
-                    <button
-                      key={chain.id}
-                      onClick={() => setSelectedChainId(chain.id)}
-                      className={`p-2 rounded-lg text-left transition-all ${
-                        selectedChainId === chain.id
-                          ? "bg-blue-600 text-white"
-                          : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                      }`}
-                    >
-                      <span className="font-medium block text-sm">{chain.name}</span>
-                      <span className={`text-xs ${selectedChainId === chain.id ? "text-blue-200" : "text-zinc-500"}`}>
-                        {chain.desc}
-                      </span>
-                    </button>
-                  ))}
+                <h3 className="text-sm font-semibold text-white mb-1">
+                  Destination Chain
+                </h3>
+                <p className="text-zinc-500 text-xs mb-3">
+                  Where deposits are sent
+                </p>
+                <div className="p-3 rounded-lg bg-blue-600 text-white">
+                  <span className="font-medium block text-sm">Polygon</span>
+                  <span className="text-xs text-blue-200">Chain ID 137</span>
+                </div>
+
+                <div className="mt-3 p-3 bg-zinc-800/60 rounded-lg border border-zinc-700/50">
+                  <p className="text-zinc-400 text-xs leading-relaxed">
+                    <span className="text-blue-400 font-medium">Dev note:</span>{" "}
+                    Set any supported chain via the{" "}
+                    <code className="text-zinc-300 bg-zinc-700/50 px-1 rounded">
+                      destination
+                    </code>{" "}
+                    prop:
+                  </p>
+                  <pre className="mt-2 text-[11px] text-zinc-400 bg-zinc-900/80 rounded p-2 overflow-x-auto">
+{`destination={{ chainId: CHAIN.BASE }}
+// CHAIN.ARBITRUM, CHAIN.OPTIMISM,
+// CHAIN.ETHEREUM, CHAIN.BNB, ...`}
+                  </pre>
                 </div>
               </div>
 
               {/* Info Box */}
               <div className="p-4 bg-zinc-900 rounded-xl border border-zinc-800">
                 <p className="text-zinc-400 text-sm">
-                  <span className="text-green-400">●</span> Auto-bridge enabled. Deposits are automatically sent to{" "}
-                  <span className="text-white font-medium">{selectedChain?.name}</span>.
+                  <span className="text-green-400">●</span> Auto-bridge enabled.
+                  Deposits are automatically sent to{" "}
+                  <span className="text-white font-medium">Polygon</span>.
                 </p>
               </div>
             </div>
@@ -260,9 +269,12 @@ export function DepositDemo() {
 
               {/* Mode Descriptions */}
               <div className="mb-4 text-sm text-zinc-500">
-                {displayMode === "modal" && "Pre-built modal component triggered by button click."}
-                {displayMode === "inline" && "Embeddable widget for direct page integration."}
-                {displayMode === "headless" && "Programmatic API with full control over UI."}
+                {displayMode === "modal" &&
+                  "Pre-built modal component triggered by button click."}
+                {displayMode === "inline" &&
+                  "Embeddable widget for direct page integration."}
+                {displayMode === "headless" &&
+                  "Programmatic API with full control over UI."}
               </div>
 
               {/* Mode Preview */}
@@ -285,7 +297,7 @@ export function DepositDemo() {
                   <div className="flex justify-center">
                     <DepositWidget
                       theme="dark"
-                      destination={{ chainId: selectedChainId }}
+                      destination={{ chainId: CHAIN.POLYGON }}
                     />
                   </div>
                 )}
@@ -293,7 +305,7 @@ export function DepositDemo() {
                 {displayMode === "headless" && (
                   <HeadlessDemo
                     ownerAddress={ownerAddress}
-                    selectedChainId={selectedChainId}
+                    selectedChainId={CHAIN.POLYGON}
                   />
                 )}
               </div>
@@ -301,11 +313,19 @@ export function DepositDemo() {
 
             {/* Right Column - Code Examples */}
             <div className="lg:col-span-4">
-              <h3 className="text-sm font-semibold text-white mb-3">Code Example</h3>
+              <h3 className="text-sm font-semibold text-white mb-3">
+                Code Example
+              </h3>
               <div className="h-[500px]">
                 <CodePanel
                   examples={getCodeExamples()}
-                  activeTab={displayMode === "modal" ? "Modal" : displayMode === "inline" ? "Inline" : "Headless"}
+                  activeTab={
+                    displayMode === "modal"
+                      ? "Modal"
+                      : displayMode === "inline"
+                        ? "Inline"
+                        : "Headless"
+                  }
                 />
               </div>
             </div>
@@ -317,7 +337,7 @@ export function DepositDemo() {
           isOpen={showModal}
           onClose={() => setShowModal(false)}
           theme="dark"
-          destination={{ chainId: selectedChainId }}
+          destination={{ chainId: CHAIN.POLYGON }}
         />
 
         <RecoveryModal
@@ -342,8 +362,9 @@ function Header() {
         </span>
       </div>
       <p className="text-zinc-500 max-w-2xl">
-        Accept deposits from any chain, automatically bridge to your preferred network.
-        Explore the three integration modes: Modal, Inline, and Headless.
+        Accept deposits from any chain, automatically bridge to your preferred
+        network. Explore the three integration modes: Modal, Inline, and
+        Headless.
       </p>
     </header>
   );

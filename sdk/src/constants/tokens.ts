@@ -118,6 +118,26 @@ export function getTokenDecimals(token: string, chainId?: number): number {
 export const DEFAULT_SUPPORTED_TOKENS = ['ETH', 'USDC', 'USDT', 'BTC', 'SOL', 'BNB'] as const;
 
 /**
+ * USD threshold below which a balance is considered "dust" — a residual
+ * leftover from a partial sweep (95% or 50% gas-fallback strategy).
+ *
+ * Dust is silently ignored: no events emitted, not shown in recovery.
+ * $0.10 is chosen because the smallest per-token minimum is USDC/USDT at
+ * $0.20, and a 50% sweep residual from a $0.20 deposit = $0.10.
+ */
+export const DUST_THRESHOLD_USD = 0.10;
+
+/**
+ * Returns true if the USD value is above the dust threshold and should
+ * be treated as a real balance. Returns true for unknown/zero USD values
+ * (erring on the side of showing the balance rather than hiding it).
+ */
+export function isAboveDustThreshold(amountUSD: number): boolean {
+  if (amountUSD <= 0) return true;
+  return amountUSD > DUST_THRESHOLD_USD;
+}
+
+/**
  * Per-token minimum deposit amounts in native units.
  * These replace the USD-based threshold to avoid reliance on API price data.
  */

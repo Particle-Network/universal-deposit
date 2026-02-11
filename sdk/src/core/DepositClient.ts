@@ -35,7 +35,7 @@ import {
   isValidEvmAddress,
   isValidSolanaAddress,
 } from '../constants';
-import { DEFAULT_SUPPORTED_TOKENS } from '../constants/tokens';
+import { DEFAULT_SUPPORTED_TOKENS, isAboveDustThreshold } from '../constants/tokens';
 import { IntermediaryService } from '../intermediary';
 import { UAManager } from '../universal-account';
 import { BalanceWatcher, Sweeper } from '../sweep';
@@ -64,6 +64,7 @@ export interface ResolvedConfig {
 export class DepositClient extends TypedEventEmitter<DepositEvents> {
   private config: ResolvedConfig;
   private status: ClientStatus = 'idle';
+  private destroyed = false;
   private depositAddresses: DepositAddresses | null = null;
   private pendingDeposits: Map<string, DetectedDeposit> = new Map();
   private sweepRetries: Map<string, number> = new Map();
@@ -94,6 +95,13 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       appId: this.config.appId,
       jwtServiceUrl: this.config.jwtServiceUrl,
     });
+  }
+
+  /**
+   * Returns true if this client has been destroyed and should no longer process events.
+   */
+  isDestroyed(): boolean {
+    return this.destroyed;
   }
 
   // ============================================
@@ -211,10 +219,6 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     this.setStatus('initializing');
 
     try {
-      // Use the intermediary address provided by the consumer
-      // This address comes from useEthereum().address after JWT connection
-      console.log('[DepositSDK] Using intermediary address:', this.config.intermediaryAddress);
-
       // Create a synthetic session with the provided intermediary address
       // No need to fetch JWT since the consumer already connected Auth Core
       this.intermediarySession = {
@@ -230,12 +234,9 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       });
       await this.uaManager.initialize();
 
-      // Get deposit addresses
       this.depositAddresses = this.uaManager.getDepositAddresses();
 
-      console.log('[DepositSDK] Deposit addresses:', this.depositAddresses);
-
-      // Phase 4: Initialize BalanceWatcher and Sweeper
+      // Initialize BalanceWatcher and Sweeper
       this.balanceWatcher = new BalanceWatcher({
         uaManager: this.uaManager,
         pollingIntervalMs: this.config.pollingIntervalMs,
@@ -247,7 +248,7 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       this.sweeper = new Sweeper({
         uaManager: this.uaManager,
         authCoreProvider: this.config.authCoreProvider,
-        destination: this.config.destination,
+        getDestination: () => this.config.destination,
       });
 
       // Initialize RefundService if enabled
@@ -267,10 +268,12 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       });
 
       this.balanceWatcher.on('deposit:below_threshold', (deposit) => {
+        if (this.destroyed) return;
         this.emit('deposit:below_threshold', deposit);
       });
 
       this.balanceWatcher.on('error', (error) => {
+        if (this.destroyed) return;
         this.emit('deposit:error', error);
       });
 
@@ -282,6 +285,7 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
   }
 
   destroy(): void {
+    this.destroyed = true;
     this.stopWatching();
     this.removeAllListeners();
     this.pendingDeposits.clear();
@@ -459,8 +463,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
         const rawAmount = this.parseBigInt(chain.rawAmount);
         const valueUSD = Number(chain.amountInUSD || 0);
 
-        // Include ANY non-zero balance (no minimum threshold)
-        if (rawAmount > 0n) {
+        // Include non-zero balances above dust threshold
+        if (rawAmount > 0n && isAboveDustThreshold(valueUSD)) {
           deposits.push({
             id: `recovery:${tokenType}:${chainId}:${Date.now()}`,
             token: tokenType.toUpperCase() as TokenType,
@@ -474,8 +478,10 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       }
     }
 
-    console.log(`[DepositSDK] Found ${deposits.length} stuck fund(s):`,
-      deposits.map(d => `${d.token} on chain ${d.chainId}: $${d.amountUSD.toFixed(2)}`));
+    if (deposits.length > 0) {
+      console.log(`[DepositSDK] Found ${deposits.length} stuck fund(s):`,
+        deposits.map(d => `${d.token}:${d.chainId} $${d.amountUSD.toFixed(2)}`).join(', '));
+    }
 
     return deposits;
   }
@@ -510,10 +516,12 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     this.setStatus('sweeping');
 
     for (const deposit of stuckFunds) {
+      if (this.destroyed) break;
       try {
         console.log(`[DepositSDK] Recovering ${deposit.token} on chain ${deposit.chainId}...`);
 
         const sweepResult = await this.sweeper.sweep(deposit);
+        if (this.destroyed) break;
 
         results.push({
           token: deposit.token,
@@ -581,6 +589,9 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
 
     try {
       const sweepResult = await this.sweeper.sweep(deposit);
+      if (this.destroyed) {
+        return { token: deposit.token, chainId: deposit.chainId, amount: deposit.amount, amountUSD: deposit.amountUSD, status: 'failed' as const, error: 'Client destroyed' };
+      }
 
       const result: RecoveryResult = {
         token: deposit.token,
@@ -600,6 +611,9 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       this.emit('recovery:complete', [result]);
       return result;
     } catch (error) {
+      if (this.destroyed) {
+        return { token: deposit.token, chainId: deposit.chainId, amount: deposit.amount, amountUSD: deposit.amountUSD, status: 'failed' as const, error: 'Client destroyed' };
+      }
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error(`[DepositSDK] Single recovery failed for ${deposit.token} on chain ${deposit.chainId}:`, error);
 
@@ -615,7 +629,9 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       this.emit('recovery:failed', deposit, error instanceof Error ? error : new Error(errorMessage));
       return result;
     } finally {
-      if (this.balanceWatcher?.isActive()) {
+      if (this.destroyed) {
+        // Skip status restoration on destroyed client
+      } else if (this.balanceWatcher?.isActive()) {
         this.setStatus('watching');
       } else {
         this.setStatus(previousStatus === 'sweeping' ? 'ready' : previousStatus);
@@ -673,7 +689,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     // Validate the new destination
     this.validateDestination(newChainId, newAddress, this.config.ownerAddress);
 
-    // Update config
+    // Update config — the Sweeper reads destination via getDestination()
+    // so it picks up this change automatically at sweep time.
     this.config = {
       ...this.config,
       destination: {
@@ -681,15 +698,6 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
         address: newAddress.toLowerCase(),
       },
     };
-
-    // Update Sweeper if initialized
-    if (this.sweeper) {
-      this.sweeper = new Sweeper({
-        uaManager: this.uaManager!,
-        authCoreProvider: this.config.authCoreProvider,
-        destination: this.config.destination,
-      });
-    }
 
     console.log(`[DepositSDK] Destination updated: ${getChainName(newChainId)} → ${newAddress}`);
   }
@@ -709,6 +717,22 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     if (this.status !== status) {
       this.status = status;
       this.emit('status:change', status);
+    }
+  }
+
+  /**
+   * Resume BalanceWatcher detection and restore status when no sweeps
+   * are in-flight. Called after a sweep completes or fails.
+   */
+  private resumeDetectionIfIdle(): void {
+    if (this.destroyed) return;
+    if (this.activeSweeps.size === 0) {
+      this.balanceWatcher?.resumeDetection();
+    }
+    if (this.balanceWatcher?.isActive()) {
+      this.setStatus('watching');
+    } else {
+      this.setStatus('ready');
     }
   }
 
@@ -749,14 +773,13 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
    * deposit:error.
    */
   private handleDepositDetected(deposit: DetectedDeposit): void {
+    if (this.destroyed) return;
+
     const retryKey = `${deposit.token.toLowerCase()}:${deposit.chainId}`;
     const attempts = this.sweepRetries.get(retryKey) || 0;
 
     // Skip if a sweep is already in-flight for this token+chain
-    if (this.activeSweeps.has(retryKey)) {
-      console.log(`[DepositSDK] Sweep already in progress for ${retryKey}, skipping`);
-      return;
-    }
+    if (this.activeSweeps.has(retryKey)) return;
 
     // If this is a retry after a failed sweep, preserve the original
     // deposit ID so the UI activity item can be updated (not duplicated)
@@ -765,11 +788,11 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       if (originalId) {
         deposit = { ...deposit, id: originalId };
       }
-      console.log(`[DepositSDK] Retrying sweep (attempt ${attempts + 1}/${DepositClient.MAX_SWEEP_RETRIES}):`, deposit.id);
+      console.log(`[DepositSDK] Sweep retry ${attempts + 1}/${DepositClient.MAX_SWEEP_RETRIES}: ${deposit.token} on ${deposit.chainId}`);
       this.pendingDeposits.set(deposit.id, deposit);
       this.emit('deposit:processing', deposit);
     } else {
-      console.log('[DepositSDK] Deposit detected:', deposit);
+      console.log(`[DepositSDK] Deposit detected: ${deposit.token} on chain ${deposit.chainId} ($${deposit.amountUSD?.toFixed(2) ?? '?'})`);
       this.originalDepositIds.set(retryKey, deposit.id);
       this.pendingDeposits.set(deposit.id, deposit);
       this.emit('deposit:detected', deposit);
@@ -783,9 +806,15 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       this.setStatus('sweeping');
       this.activeSweeps.add(retryKey);
 
+      // Suppress detection while sweeping to prevent phantom deposits
+      // caused by the UA SDK moving funds across chains internally
+      this.balanceWatcher?.suppressDetection();
+
       const currentDeposit = deposit;
+      console.log('[DepositSDK] Sweeping with destination:', this.config.destination);
       this.sweeper.sweep(currentDeposit)
         .then((result) => {
+          if (this.destroyed) return;
           this.activeSweeps.delete(retryKey);
           // Success - clean up all tracking state
           this.pendingDeposits.delete(currentDeposit.id);
@@ -796,23 +825,19 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
           const resultWithOriginalId = { ...result, depositId: currentDeposit.id };
           this.emit('deposit:complete', resultWithOriginalId);
 
-          // Return to watching if still active
-          if (this.balanceWatcher?.isActive()) {
-            this.setStatus('watching');
-          } else {
-            this.setStatus('ready');
-          }
+          // Resume detection now that sweep is done
+          this.resumeDetectionIfIdle();
         })
         .catch((error) => {
+          if (this.destroyed) return;
           this.activeSweeps.delete(retryKey);
           console.error(`[DepositSDK] Auto-sweep failed (attempt ${attempts + 1}/${DepositClient.MAX_SWEEP_RETRIES}):`, error);
 
           if (attempts + 1 < DepositClient.MAX_SWEEP_RETRIES) {
             // Retries left — keep item in "processing" state and retry directly
             this.sweepRetries.set(retryKey, attempts + 1);
-            console.log(`[DepositSDK] Scheduling retry in ${DepositClient.SWEEP_RETRY_DELAY_MS}ms`);
             setTimeout(() => {
-              if (this.status === 'idle') return; // Client was destroyed
+              if (this.destroyed) return;
               this.handleDepositDetected(currentDeposit);
             }, DepositClient.SWEEP_RETRY_DELAY_MS);
           } else {
@@ -827,12 +852,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
               return;
             }
 
-            // Return to watching if still active
-            if (this.balanceWatcher?.isActive()) {
-              this.setStatus('watching');
-            } else {
-              this.setStatus('ready');
-            }
+            // Resume detection now that all retries are exhausted
+            this.resumeDetectionIfIdle();
           }
         });
     }
@@ -871,6 +892,7 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     console.log(`[DepositSDK] Waiting ${delayMs}ms before refund attempt ${currentAttempts + 1}/${maxAttempts}`);
 
     await this.delay(delayMs);
+    if (this.destroyed) return;
 
     // Increment attempt counter
     this.refundAttempts.set(deposit.id, currentAttempts + 1);
@@ -881,6 +903,7 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
 
     try {
       const result = await this.refundService.refund(deposit, reason);
+      if (this.destroyed) return;
 
       if (result.status === 'success') {
         console.log(`[DepositSDK] Refund successful: ${deposit.token} on chain ${deposit.chainId}`);
@@ -903,6 +926,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
         throw new RefundError(result.error || 'Refund failed', deposit.id, deposit.chainId);
       }
     } catch (error) {
+      if (this.destroyed) return;
+
       const refundError = error instanceof RefundError
         ? error
         : new RefundError(
@@ -924,6 +949,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
         // For now, the deposit stays in pending for manual recovery
       }
     }
+
+    if (this.destroyed) return;
 
     // Return to watching
     if (this.balanceWatcher?.isActive()) {
