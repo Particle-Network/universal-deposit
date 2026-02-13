@@ -53,10 +53,10 @@ const client = new DepositClient(config: DepositClientConfig);
 | `supportedTokens` | `TokenType[]` | No | All tokens | Filter which tokens to watch |
 | `supportedChains` | `number[]` | No | All 17 chains | Filter which chains to watch |
 | `autoSweep` | `boolean` | No | `true` | Auto-sweep detected deposits |
-| `minValueUSD` | `number` | No | `0.10` | Minimum USD value to trigger sweep |
-| `pollingIntervalMs` | `number` | No | `8000` | Balance check interval |
+| `minValueUSD` | `number` | No | `0.20` | Minimum USD value to trigger sweep |
+| `pollingIntervalMs` | `number` | No | `3000` | Balance check interval |
 | `recovery` | `RecoveryConfig` | No | — | Recovery behavior options |
-| `refund` | `RefundConfig` | No | `{ enabled: true }` | Auto-refund when sweep fails |
+| `refund` | `RefundConfig` | No | `{ enabled: false }` | Auto-refund when sweep fails (experimental) |
 
 *Required for bridge operations
 
@@ -284,9 +284,9 @@ function App() {
 | `supportedTokens` | `TokenType[]` | All | Tokens to support |
 | `supportedChains` | `number[]` | All | Chains to support |
 | `autoSweep` | `boolean` | `true` | Enable auto-sweep |
-| `minValueUSD` | `number` | `0.10` | Minimum USD threshold |
-| `pollingIntervalMs` | `number` | `8000` | Polling interval |
-| `refund` | `RefundConfig` | `{ enabled: true }` | Auto-refund configuration |
+| `minValueUSD` | `number` | `0.20` | Minimum USD threshold |
+| `pollingIntervalMs` | `number` | `3000` | Polling interval |
+| `refund` | `RefundConfig` | `{ enabled: false }` | Auto-refund configuration (experimental) |
 
 **Destination Examples:**
 
@@ -647,7 +647,7 @@ interface RefundConfig {
 **Examples:**
 
 ```typescript
-// Default: auto-refund enabled
+// Default: auto-refund disabled (experimental)
 const client = new DepositClient({ ownerAddress, intermediaryAddress });
 
 // Disable auto-refund
@@ -881,7 +881,7 @@ import { DEFAULT_SUPPORTED_TOKENS } from '@particle-network/deposit-sdk';
 import {
   DEFAULT_DESTINATION_CHAIN_ID,  // 42161 (Arbitrum)
   DEFAULT_MIN_VALUE_USD,         // 0.20
-  DEFAULT_POLLING_INTERVAL_MS,   // 8000
+  DEFAULT_POLLING_INTERVAL_MS,   // 3000
 } from '@particle-network/deposit-sdk';
 ```
 

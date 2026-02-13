@@ -168,8 +168,8 @@ const client = new DepositClient({
   supportedTokens: ['ETH', 'USDC', 'USDT'], // Defaults to all
   supportedChains: [1, 42161, 8453],        // Defaults to all 17 chains
   autoSweep: true,                          // Default: true
-  minValueUSD: 0.5,                         // Default: 0.5
-  pollingIntervalMs: 8000,                  // Default: 8000
+  minValueUSD: 0.2,                         // Default: 0.20
+  pollingIntervalMs: 3000,                  // Default: 3000
 });
 ```
 
@@ -294,8 +294,8 @@ function App() {
 - `supportedTokens` — Array of token types to support
 - `supportedChains` — Array of chain IDs to support
 - `autoSweep` — Enable auto-sweep (default: true)
-- `minValueUSD` — Minimum deposit value in USD (default: 0.5)
-- `pollingIntervalMs` — Balance polling interval (default: 8000)
+- `minValueUSD` — Minimum deposit value in USD (default: 0.20)
+- `pollingIntervalMs` — Balance polling interval (default: 3000)
 
 **Destination Examples:**
 
@@ -454,7 +454,8 @@ sdk/
 │   │
 │   ├── sweep/                     # Balance watching & sweeping
 │   │   ├── BalanceWatcher.ts     # Polls for balance changes
-│   │   ├── Sweeper.ts            # Multi-strategy sweep logic
+│   │   ├── Sweeper.ts            # Low-probe sweep logic ($0.01 probe + optimal)
+│   │   ├── fee-math.ts           # Fee extraction & optimal amount calculation
 │   │   └── index.ts
 │   │
 │   ├── types/
@@ -480,7 +481,9 @@ sdk/
 │   │   │   ├── jwt-worker.integration.test.ts
 │   │   │   └── ua-manager.integration.test.ts
 │   │   ├── BalanceWatcher.test.ts
-│   │   └── IntermediaryService.test.ts
+│   │   ├── IntermediaryService.test.ts
+│   │   ├── Sweeper.test.ts
+│   │   └── fee-math.test.ts
 │   │
 │   └── index.ts                  # Public exports
 │

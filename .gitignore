@@ -118,3 +118,5 @@ dist
 .pnp.*
 
 deposit-demo-connectkit/
+CLAUDE.md
+.reports/

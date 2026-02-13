@@ -125,7 +125,7 @@ export const DEFAULT_SUPPORTED_TOKENS = ['ETH', 'USDC', 'USDT', 'BTC', 'SOL', 'B
  * $0.10 is chosen because the smallest per-token minimum is USDC/USDT at
  * $0.20, and a 50% sweep residual from a $0.20 deposit = $0.10.
  */
-export const DUST_THRESHOLD_USD = 0.10;
+const DUST_THRESHOLD_USD = 0.10;
 
 /**
  * Returns true if the USD value is above the dust threshold and should
@@ -141,7 +141,7 @@ export function isAboveDustThreshold(amountUSD: number): boolean {
  * Per-token minimum deposit amounts in native units.
  * These replace the USD-based threshold to avoid reliance on API price data.
  */
-export const MIN_DEPOSIT_AMOUNTS: Record<string, number> = {
+const MIN_DEPOSIT_AMOUNTS: Record<string, number> = {
   USDC: 0.2,
   USDT: 0.2,
   ETH: 0.0004,

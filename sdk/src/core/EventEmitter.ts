@@ -3,7 +3,7 @@
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type EventMap = Record<string, (...args: any[]) => void>;
+type EventMap = Record<string, (...args: any[]) => void>;
 
 export class TypedEventEmitter<T extends EventMap = EventMap> {
   private listeners: Map<keyof T, Set<T[keyof T]>> = new Map();

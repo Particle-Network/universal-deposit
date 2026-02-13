@@ -8,19 +8,14 @@
  */
 
 import { JwtError, AuthenticationError } from '../core/errors';
-import type { JwtResponse, IntermediarySession, AuthCoreProvider } from '../core/types';
+import type { JwtResponse, IntermediarySession } from '../core/types';
 import { DEFAULT_JWT_SERVICE_URL } from '../constants';
 
-export interface IntermediaryConfig {
+interface IntermediaryConfig {
   projectId: string;
   clientKey: string;
   appId: string;
   jwtServiceUrl: string;
-}
-
-export interface AuthCoreConnection {
-  address: string;
-  provider: AuthCoreProvider;
 }
 
 export class IntermediaryService {

@@ -124,7 +124,7 @@ export interface DepositClientConfig {
    * 1. The original sender's address (if `refundToSender: true` and sender is known)
    * 2. Otherwise, the owner's address on the source chain
    *
-   * @default { enabled: true }
+   * @default { enabled: false }
    */
   refund?: RefundConfig;
 

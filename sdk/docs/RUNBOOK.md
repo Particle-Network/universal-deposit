@@ -42,8 +42,8 @@ npm publish --access public
 
 ### Health Indicators
 
-1. **JWT Service**: Verify `https://deposit-jwt-worker.pnetwork.workers.dev/health` returns 200
-2. **Balance Watcher**: Polling should occur every 8s (default)
+1. **JWT Service**: Verify `https://deposit-auth-worker.deposit-kit.workers.dev/health` returns 200
+2. **Balance Watcher**: Polling should occur every 3s (default)
 3. **Sweep Success Rate**: Track `deposit:complete` vs `deposit:error` ratio
 
 ## Common Issues
@@ -66,9 +66,11 @@ npm publish --access public
 **Symptoms**: `SweepError` with gas estimation failures
 **Cause**: Insufficient gas or network congestion
 **Resolution**:
-1. SDK automatically tries 100%, 95%, 50% amounts
-2. If all fail, wait and retry manually
-3. Check destination chain for congestion
+1. SDK probes at $0.01 to extract gas fee, then calculates optimal amount
+2. If optimal fails, it retries at 90% of optimal
+3. If both fail, check destination chain for congestion
+4. Look for `[Sweeper] Step 2: Fee extraction result:` in logs for fee details
+5. If gas fee exceeds deposit value, the deposit is too small to sweep
 
 ### Issue: Deposits Not Detected
 **Symptoms**: Funds visible on chain but no `deposit:detected` event
@@ -109,10 +111,11 @@ await client.sweep();
 |--------|---------|-------------|
 | `destination.chainId` | 42161 (Arbitrum) | Target chain for sweeps |
 | `autoSweep` | true | Auto-sweep on deposit detection |
-| `minValueUSD` | 0.5 | Minimum USD value to trigger events |
-| `pollingIntervalMs` | 8000 | Balance check interval |
-| `supportedTokens` | ETH, USDC, USDT | Tokens to watch |
-| `supportedChains` | [1, 10, 42161, ...] | Chains to monitor |
+| `minValueUSD` | 0.20 | Minimum USD value to trigger events |
+| `pollingIntervalMs` | 3000 | Balance check interval |
+| `supportedTokens` | ETH, USDC, USDT, BTC, SOL, BNB | Tokens to watch |
+| `supportedChains` | [1, 10, 42161, ...] | Chains to monitor (17 chains) |
+| `refund.enabled` | false | Auto-refund on sweep failure (experimental) |
 
 ## Support Contacts
 
