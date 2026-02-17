@@ -26,16 +26,12 @@ export interface AuthCoreProvider {
  * Configuration for the sweep destination (where funds are sent after deposit)
  *
  * @example
- * // Default: sweep to owner's EOA on Arbitrum
- * destination: undefined
- *
- * @example
  * // Sweep to owner's EOA on Base
  * destination: { chainId: CHAIN.BASE }
  *
  * @example
  * // Sweep to a custom treasury address on Arbitrum
- * destination: { address: '0xTreasury...' }
+ * destination: { chainId: CHAIN.ARBITRUM, address: '0xTreasury...' }
  *
  * @example
  * // Sweep to a custom address on Ethereum mainnet
@@ -52,23 +48,21 @@ export interface DestinationConfig {
    * - For EVM chains: must be a valid 0x-prefixed address (42 characters)
    * - For Solana: must be a valid base58 address (32-44 characters)
    *
-   * ⚠️ Warning: If set to a different address than ownerAddress, ensure the
+   * Warning: If set to a different address than ownerAddress, ensure the
    * recipient has access to this address. Funds sent to an inaccessible
    * address cannot be recovered.
    */
   address?: string;
 
   /**
-   * The chain ID to sweep funds to.
+   * The chain ID to sweep funds to. Required.
    *
-   * - If not specified, defaults to Arbitrum (42161)
    * - Must be a supported chain from the CHAIN constant
    * - The chain's address type (EVM/Solana) must match the address format
    *
    * @see CHAIN constant for available chain IDs
-   * @default 42161 (Arbitrum)
    */
-  chainId?: number;
+  chainId: number;
 }
 
 export interface DepositClientConfig {
@@ -87,13 +81,13 @@ export interface DepositClientConfig {
   authCoreProvider?: AuthCoreProvider;
 
   /**
-   * Configuration for where swept funds are sent.
+   * Configuration for where swept funds are sent. Required.
    *
-   * Defaults to sweeping to the owner's EOA on Arbitrum if not specified.
+   * Must include at least `chainId`. If `address` is omitted, defaults to the owner's EOA.
    *
    * @see DestinationConfig for full documentation and examples
    */
-  destination?: DestinationConfig;
+  destination: DestinationConfig;
 
   // Token filtering
   supportedTokens?: TokenType[];

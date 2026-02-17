@@ -34,7 +34,6 @@ import {
   DEFAULT_PROJECT_ID,
   DEFAULT_CLIENT_KEY,
   DEFAULT_APP_ID,
-  DEFAULT_DESTINATION_CHAIN_ID,
   DEFAULT_JWT_SERVICE_URL,
 } from "../../constants";
 
@@ -42,25 +41,19 @@ import {
  * Configuration for the DepositProvider
  *
  * @example
- * // Default configuration (sweep to owner's EOA on Arbitrum)
- * <DepositProvider>
+ * // Sweep to owner's EOA on Arbitrum
+ * <DepositProvider config={{ destination: { chainId: CHAIN.ARBITRUM } }}>
  *   <App />
  * </DepositProvider>
  *
  * @example
- * // Sweep to a different chain
+ * // Sweep to owner's EOA on Base
  * <DepositProvider config={{ destination: { chainId: CHAIN.BASE } }}>
  *   <App />
  * </DepositProvider>
  *
  * @example
- * // Sweep to a custom treasury address
- * <DepositProvider config={{ destination: { address: '0xTreasury...' } }}>
- *   <App />
- * </DepositProvider>
- *
- * @example
- * // Sweep to a custom address on a specific chain
+ * // Sweep to a custom address on Ethereum
  * <DepositProvider config={{
  *   destination: {
  *     chainId: CHAIN.ETHEREUM,
@@ -72,10 +65,11 @@ import {
  */
 export interface DepositConfig {
   /**
-   * Destination configuration for where swept funds are sent.
+   * Destination configuration for where swept funds are sent. Required.
+   * Must include at least `chainId`.
    * @see DestinationConfig for full documentation
    */
-  destination?: DestinationConfig;
+  destination: DestinationConfig;
   supportedTokens?: TokenType[];
   supportedChains?: number[];
   autoSweep?: boolean;
@@ -543,8 +537,8 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
               authCoreProvider.signMessage(message),
           },
           destination: {
-            chainId: pendingDest?.chainId ?? cfg.destination?.chainId ?? DEFAULT_DESTINATION_CHAIN_ID,
-            address: pendingDest?.address ?? cfg.destination?.address,
+            chainId: pendingDest?.chainId ?? cfg.destination.chainId,
+            address: pendingDest?.address ?? cfg.destination.address,
           },
           supportedTokens: cfg.supportedTokens,
           supportedChains: cfg.supportedChains,
@@ -1062,12 +1056,12 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 }
 
 export interface DepositProviderProps {
-  config?: DepositConfig;
+  config: DepositConfig;
   children: React.ReactNode;
 }
 
 export function DepositProvider({
-  config = {},
+  config,
   children,
 }: DepositProviderProps) {
   return (

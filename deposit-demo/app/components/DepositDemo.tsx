@@ -51,7 +51,6 @@ export function DepositDemo() {
   // Initialize SDK with owner address — destination is fixed to Polygon
   const { isConnecting, isReady, error, disconnect } = useDeposit({
     ownerAddress: isWalletReady ? ownerAddress : undefined,
-    destination: { chainId: CHAIN.POLYGON },
   });
 
   // Wallet creation timeout handling
@@ -297,7 +296,7 @@ export function DepositDemo() {
                   <div className="flex justify-center">
                     <DepositWidget
                       theme="dark"
-                      destination={{ chainId: CHAIN.POLYGON }}
+                      // destination={{ chainId: CHAIN.POLYGON }}
                     />
                   </div>
                 )}

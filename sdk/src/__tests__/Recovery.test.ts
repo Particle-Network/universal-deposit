@@ -94,6 +94,7 @@ describe('Fund Recovery', () => {
       authCoreProvider: {
         signMessage: vi.fn().mockResolvedValue('0xsignature'),
       },
+      destination: { chainId: 42161 },
     });
 
     await client.initialize();

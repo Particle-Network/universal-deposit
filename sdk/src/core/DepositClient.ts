@@ -22,7 +22,6 @@ import type {
 import { RefundService, DEFAULT_REFUND_CONFIG } from '../refund';
 import {
   DEFAULT_JWT_SERVICE_URL,
-  DEFAULT_DESTINATION_CHAIN_ID,
   DEFAULT_MIN_VALUE_USD,
   DEFAULT_POLLING_INTERVAL_MS,
   DEFAULT_SUPPORTED_CHAINS,
@@ -127,8 +126,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     }
 
     // Validate destination configuration
-    const destinationChainId = config.destination?.chainId ?? DEFAULT_DESTINATION_CHAIN_ID;
-    const destinationAddress = config.destination?.address?.trim() || config.ownerAddress.trim();
+    const destinationChainId = config.destination.chainId;
+    const destinationAddress = config.destination.address?.trim() || config.ownerAddress.trim();
 
     this.validateDestination(destinationChainId, destinationAddress, config.ownerAddress);
 
@@ -141,8 +140,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       intermediaryAddress: config.intermediaryAddress.trim().toLowerCase(),
       authCoreProvider: config.authCoreProvider,
       destination: {
-        address: config.destination?.address?.trim().toLowerCase() || config.ownerAddress.trim().toLowerCase(),
-        chainId: config.destination?.chainId ?? DEFAULT_DESTINATION_CHAIN_ID,
+        address: config.destination.address?.trim().toLowerCase() || config.ownerAddress.trim().toLowerCase(),
+        chainId: config.destination.chainId,
       },
       supportedTokens: config.supportedTokens ?? [...DEFAULT_SUPPORTED_TOKENS],
       supportedChains: config.supportedChains ?? DEFAULT_SUPPORTED_CHAINS,

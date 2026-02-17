@@ -1,7 +1,7 @@
 "use client";
 
 import { PrivyProvider } from "@privy-io/react-auth";
-import { DepositProvider } from "@particle-network/deposit-sdk/react";
+import { DepositProvider, CHAIN } from "@particle-network/deposit-sdk/react";
 
 const PRIVY_APP_ID = "cmk42oyun0316ky0cwqf3abt7";
 
@@ -24,6 +24,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
     >
       <DepositProvider
         config={{
+          destination: {
+            chainId: CHAIN.POLYGON,
+            // address: "CUSTOM_DESTINATION_ADDRESS", // Default: User's connected wallet address
+          },
           autoSweep: true,
           minValueUSD: 1,
         }}

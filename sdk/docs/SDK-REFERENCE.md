@@ -48,8 +48,9 @@ const client = new DepositClient(config: DepositClientConfig);
 | `ownerAddress` | `string` | Yes | — | User's wallet address (sweep destination) |
 | `intermediaryAddress` | `string` | Yes | — | JWT wallet address from Auth Core |
 | `authCoreProvider` | `AuthCoreProvider` | No* | — | Provider for signing sweep transactions |
+| `destination` | `DestinationConfig` | Yes | — | Where swept funds are sent (must include `chainId`) |
 | `destination.address` | `string` | No | `ownerAddress` | Custom sweep destination |
-| `destination.chainId` | `number` | No | `42161` | Destination chain (default: Arbitrum) |
+| `destination.chainId` | `number` | Yes | — | Destination chain ID (use `CHAIN` constant) |
 | `supportedTokens` | `TokenType[]` | No | All tokens | Filter which tokens to watch |
 | `supportedChains` | `number[]` | No | All 17 chains | Filter which chains to watch |
 | `autoSweep` | `boolean` | No | `true` | Auto-sweep detected deposits |
@@ -279,7 +280,7 @@ function App() {
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `destination.chainId` | `number` | `42161` | Sweep destination chain |
+| `destination.chainId` | `number` | N/A | Sweep destination chain |
 | `destination.address` | `string` | Owner's EOA | Custom sweep destination address |
 | `supportedTokens` | `TokenType[]` | All | Tokens to support |
 | `supportedChains` | `number[]` | All | Chains to support |
@@ -521,11 +522,10 @@ interface DestinationConfig {
   address?: string;
 
   /**
-   * The chain ID to sweep funds to.
-   * Defaults to Arbitrum (42161) if not specified.
+   * The chain ID to sweep funds to. Required.
    * Must be a supported chain from the CHAIN constant.
    */
-  chainId?: number;
+  chainId: number;
 }
 ```
 
@@ -534,14 +534,14 @@ interface DestinationConfig {
 ```typescript
 import { CHAIN } from '@particle-network/deposit-sdk';
 
-// Default: sweep to owner's EOA on Arbitrum
-destination: undefined
+// Sweep to owner's EOA on Arbitrum
+destination: { chainId: CHAIN.ARBITRUM }
 
 // Sweep to owner's EOA on Base
 destination: { chainId: CHAIN.BASE }
 
 // Sweep to a custom treasury on Arbitrum
-destination: { address: '0xTreasury...' }
+destination: { chainId: CHAIN.ARBITRUM, address: '0xTreasury...' }
 
 // Sweep to a custom address on Ethereum mainnet
 destination: {
@@ -879,7 +879,6 @@ import { DEFAULT_SUPPORTED_TOKENS } from '@particle-network/deposit-sdk';
 
 ```typescript
 import {
-  DEFAULT_DESTINATION_CHAIN_ID,  // 42161 (Arbitrum)
   DEFAULT_MIN_VALUE_USD,         // 0.20
   DEFAULT_POLLING_INTERVAL_MS,   // 3000
 } from '@particle-network/deposit-sdk';

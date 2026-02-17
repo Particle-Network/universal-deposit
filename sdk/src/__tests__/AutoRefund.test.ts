@@ -96,6 +96,7 @@ describe('Auto-Refund', () => {
       authCoreProvider: {
         signMessage: vi.fn().mockResolvedValue('0xsignature'),
       },
+      destination: { chainId: 42161 },
       refund: {
         enabled: true,
         delayMs: 100, // Short delay for tests
@@ -133,6 +134,7 @@ describe('Auto-Refund', () => {
       const clientWithDefaults = new DepositClient({
         ownerAddress: '0x1234567890123456789012345678901234567890',
         intermediaryAddress: '0xabcdef1234567890abcdef1234567890abcdef12',
+        destination: { chainId: 42161 },
       });
 
       const config = clientWithDefaults.getConfig();
@@ -190,6 +192,7 @@ describe('Auto-Refund', () => {
       const clientNoRefund = new DepositClient({
         ownerAddress: '0x1234567890123456789012345678901234567890',
         intermediaryAddress: '0xabcdef1234567890abcdef1234567890abcdef12',
+        destination: { chainId: 42161 },
         refund: { enabled: false },
       });
 
