@@ -9,7 +9,7 @@
  */
 
 /** Breakdown of fees from a universal transaction probe */
-export interface FeeBreakdown {
+interface FeeBreakdown {
   /** Total fee in USD (gas + LP + service) */
   totalFeeUSD: number
   /** Fixed gas fee in USD */

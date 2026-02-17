@@ -46,7 +46,7 @@ export const LOGO_URLS: Record<string, string> = {
   BNB: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/binance/info/logo.png",
 };
 
-export interface ChainOption {
+interface ChainOption {
   id: number;
   name: string;
   color: string;

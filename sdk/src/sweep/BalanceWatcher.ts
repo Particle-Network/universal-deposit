@@ -24,7 +24,7 @@ export interface BalanceWatcherConfig {
   supportedChains: number[];
 }
 
-export type BalanceWatcherEvents = {
+type BalanceWatcherEvents = {
   'deposit:detected': (deposit: DetectedDeposit) => void;
   'deposit:below_threshold': (deposit: DetectedDeposit) => void;
   'error': (error: Error) => void;

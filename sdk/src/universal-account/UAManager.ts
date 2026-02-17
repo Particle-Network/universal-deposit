@@ -26,7 +26,7 @@ export interface SmartAccountOptions {
   solanaSmartAccount: string;
 }
 
-export interface ChainAggregationItem {
+interface ChainAggregationItem {
   token?: {
     chainId: number;
     [key: string]: unknown;

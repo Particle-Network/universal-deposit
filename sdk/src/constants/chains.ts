@@ -24,7 +24,7 @@ export const CHAIN = {
 
 export type ChainId = (typeof CHAIN)[keyof typeof CHAIN];
 
-export interface ChainMeta {
+interface ChainMeta {
   name: string;
   addressType: 'evm' | 'solana';
   color: string;
