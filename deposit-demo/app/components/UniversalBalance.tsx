@@ -68,10 +68,9 @@ const TOKEN_NAMES: Record<string, string> = {
   mnt: "Mantle",
 };
 
-// Project credentials (same as SDK uses)
-const PROJECT_ID = "2e1612a2-5757-4026-82b1-e0a7a3a69698";
-const CLIENT_KEY = "cQRTw7Eqag5yHpa3iKkvwQ8J7qThRy1ZAqfPJwdy";
-const APP_ID = "30c594e4-5615-49c9-89d6-86227f5e423e";
+const PROJECT_ID = process.env.NEXT_PUBLIC_PARTICLE_PROJECT_ID!;
+const CLIENT_KEY = process.env.NEXT_PUBLIC_PARTICLE_CLIENT_KEY!;
+const APP_ID = process.env.NEXT_PUBLIC_PARTICLE_APP_ID!;
 
 export function UniversalBalance({ ownerAddress }: UniversalBalanceProps) {
   const [data, setData] = useState<PrimaryAssetsData | null>(null);
@@ -104,7 +103,8 @@ export function UniversalBalance({ ownerAddress }: UniversalBalanceProps) {
       const primaryAssets = await ua.getPrimaryAssets();
       setData(primaryAssets as PrimaryAssetsData);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to fetch balance";
+      const message =
+        err instanceof Error ? err.message : "Failed to fetch balance";
       setError(message);
     } finally {
       setIsLoading(false);
@@ -142,19 +142,24 @@ export function UniversalBalance({ ownerAddress }: UniversalBalanceProps) {
   };
 
   // Filter assets with non-zero balance
-  const assetsWithBalance = data?.assets.filter((asset) => asset.amountInUSD > 0.01) || [];
+  const assetsWithBalance =
+    data?.assets.filter((asset) => asset.amountInUSD > 0.01) || [];
 
   return (
     <>
       {/* Balance Card */}
       <div
-        onClick={() => data && assetsWithBalance.length > 0 && setIsDialogOpen(true)}
+        onClick={() =>
+          data && assetsWithBalance.length > 0 && setIsDialogOpen(true)
+        }
         className={`bg-zinc-900 rounded-xl p-6 border border-zinc-800 ${
-          data && assetsWithBalance.length > 0 ? "cursor-pointer hover:border-zinc-700 transition-colors" : ""
+          data && assetsWithBalance.length > 0
+            ? "cursor-pointer hover:border-zinc-700 transition-colors"
+            : ""
         }`}
       >
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-white font-semibold">Universal Account Balance</h2>
+          <h2 className="text-white font-semibold">EOA Balance</h2>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -193,7 +198,8 @@ export function UniversalBalance({ ownerAddress }: UniversalBalanceProps) {
               {data ? formatUSD(data.totalAmountInUSD) : "$0.00"}
             </p>
             <p className="text-zinc-500 text-sm mt-2">
-              <span className="text-green-400">●</span> Unified across all chains
+              <span className="text-green-400">●</span> Unified across all
+              chains
               {assetsWithBalance.length > 0 && (
                 <span className="text-zinc-400 ml-2">• Click for details</span>
               )}
@@ -215,15 +221,29 @@ export function UniversalBalance({ ownerAddress }: UniversalBalanceProps) {
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-zinc-800">
               <div>
-                <h3 className="text-white font-semibold text-lg">Balance Breakdown</h3>
-                <p className="text-zinc-500 text-sm">{formatUSD(data.totalAmountInUSD)} total</p>
+                <h3 className="text-white font-semibold text-lg">
+                  Balance Breakdown
+                </h3>
+                <p className="text-zinc-500 text-sm">
+                  {formatUSD(data.totalAmountInUSD)} total
+                </p>
               </div>
               <button
                 onClick={() => setIsDialogOpen(false)}
                 className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
             </div>
@@ -231,15 +251,20 @@ export function UniversalBalance({ ownerAddress }: UniversalBalanceProps) {
             {/* Content */}
             <div className="p-4 overflow-y-auto max-h-[60vh] space-y-4">
               {assetsWithBalance.length === 0 ? (
-                <p className="text-zinc-500 text-center py-8">No assets with balance</p>
+                <p className="text-zinc-500 text-center py-8">
+                  No assets with balance
+                </p>
               ) : (
                 assetsWithBalance.map((asset) => {
                   const chainsWithBalance = asset.chainAggregation.filter(
-                    (chain) => chain.amountInUSD > 0.001
+                    (chain) => chain.amountInUSD > 0.001,
                   );
 
                   return (
-                    <div key={asset.tokenType} className="bg-zinc-800/50 rounded-lg p-4">
+                    <div
+                      key={asset.tokenType}
+                      className="bg-zinc-800/50 rounded-lg p-4"
+                    >
                       {/* Token Header */}
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
@@ -251,9 +276,12 @@ export function UniversalBalance({ ownerAddress }: UniversalBalanceProps) {
                           </span>
                         </div>
                         <div className="text-right">
-                          <p className="text-white font-medium">{formatUSD(asset.amountInUSD)}</p>
+                          <p className="text-white font-medium">
+                            {formatUSD(asset.amountInUSD)}
+                          </p>
                           <p className="text-zinc-500 text-xs">
-                            {formatAmount(asset.amount)} @ {formatUSD(asset.price)}
+                            {formatAmount(asset.amount)} @{" "}
+                            {formatUSD(asset.price)}
                           </p>
                         </div>
                       </div>

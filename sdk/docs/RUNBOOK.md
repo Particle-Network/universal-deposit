@@ -8,7 +8,7 @@ User EOA (Privy, etc.) → Intermediary Wallet (JWT) → Universal Account
        │ sweep destination        │ owns & signs             │ deposit addresses
        ▼                          ▼                           ▼
   Receives funds             Auth Core Provider         EVM + Solana
-  (on Arbitrum)                                        Smart Accounts
+  (configurable)                                       Smart Accounts
 ```
 
 ## Deployment
@@ -109,9 +109,9 @@ await client.sweep();
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `destination.chainId` | 42161 (Arbitrum) | Target chain for sweeps |
+| `destination.chainId` | — (required) | Target chain for sweeps (use `CHAIN` constant) |
 | `autoSweep` | true | Auto-sweep on deposit detection |
-| `minValueUSD` | 0.20 | Minimum USD value to trigger events |
+| `minValueUSD` | 0.50 | Minimum USD value to trigger events |
 | `pollingIntervalMs` | 3000 | Balance check interval |
 | `supportedTokens` | ETH, USDC, USDT, BTC, SOL, BNB | Tokens to watch |
 | `supportedChains` | [1, 10, 42161, ...] | Chains to monitor (17 chains) |

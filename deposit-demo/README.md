@@ -1,152 +1,81 @@
 # Deposit SDK Demo
 
-A Next.js demo application showcasing the Particle Network Deposit SDK with Privy authentication and automatic deposit sweeping.
+Next.js 14 demo app for the [Particle Network Deposit SDK](../sdk/docs/SDK-REFERENCE.md) with Privy auth.
 
-## What It Does
+## Quick Start
 
-This demo demonstrates a complete deposit flow:
+```bash
+# Build the SDK first
+cd ../sdk && npm run build
 
-1. **User Authentication** — Login with Privy (email, wallet, or social)
-2. **Automatic SDK Initialization** — The SDK handles JWT fetching and Auth Core connection internally
-3. **Deposit Address Display** — Shows the EVM/Solana deposit addresses where users can send funds
-4. **Automatic Deposit Detection** — Monitors the Universal Account for incoming deposits
-5. **Auto-Sweep to EOA** — Automatically sweeps detected deposits to the user's connected wallet on Arbitrum
+# Configure environment
+cd ../deposit-demo
+cp .env.sample .env
+# Fill in your credentials (see Environment Variables below)
+
+# Run the demo
+npm install && npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+## Environment Variables
+
+Copy `.env.sample` to `.env` and fill in the values:
+
+| Variable | Description | Dashboard |
+|----------|-------------|-----------|
+| `NEXT_PUBLIC_PRIVY_APP_ID` | Privy application ID | [dashboard.privy.io](https://dashboard.privy.io) |
+| `NEXT_PUBLIC_PARTICLE_PROJECT_ID` | Particle project ID | [dashboard.particle.network](https://dashboard.particle.network) |
+| `NEXT_PUBLIC_PARTICLE_CLIENT_KEY` | Particle client key | [dashboard.particle.network](https://dashboard.particle.network) |
+| `NEXT_PUBLIC_PARTICLE_APP_ID` | Particle app UUID | [dashboard.particle.network](https://dashboard.particle.network) |
 
 ## How It Works
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Privy Login    │     │  Deposit SDK    │     │  Universal      │
-│  (User's EOA)   │ ──▶ │  (handles JWT)  │ ──▶ │  Account        │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-        │                       │                        │
-        │ destination           │ auto-sweep             │ deposit addresses
-        ▼                       ▼                        ▼
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Receives swept │     │  Intermediary   │     │  EVM + Solana   │
-│  funds (Arb)    │     │  Wallet (JWT)   │     │  Smart Accounts │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-```
+1. User logs in via Privy (email, wallet, or social)
+2. SDK auto-initializes (JWT fetch, Auth Core connection, Universal Account setup)
+3. Widget displays EVM + Solana deposit addresses
+4. SDK watches for incoming deposits and auto-sweeps to the user's wallet
 
-### Simplified Integration
+## Integration
 
-The SDK now handles all the complexity internally. You just need to:
-
-1. Wrap your app with `DepositProvider`
-2. Use the `useDeposit` hook with the user's wallet address
-3. Render the `DepositModal` component
+The demo uses two SDK components — `DepositProvider` and `useDeposit`:
 
 ```tsx
-// That's all you need!
-const { isReady, isConnecting } = useDeposit({
-  ownerAddress: authenticated ? walletAddress : undefined,
-});
+// providers.tsx — wrap your app
+<PrivyProvider>
+  <DepositProvider config={{ destination: { chainId: CHAIN.BASE } }}>
+    <App />
+  </DepositProvider>
+</PrivyProvider>
 ```
 
-The SDK automatically:
-- Fetches a JWT from the hosted worker
-- Connects to Particle Auth Core
-- Initializes the Universal Account
-- Starts watching for deposits
-- Auto-sweeps to the user's wallet on Arbitrum
+```tsx
+// DepositDemo.tsx — use the hook + modal
+const { isReady } = useDeposit({ ownerAddress: walletAddress });
 
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+
-- The SDK must be built first: `cd ../sdk && npm run build`
-
-### Installation
-
-```bash
-npm install
+<DepositModal isOpen={open} onClose={() => setOpen(false)} />
 ```
 
-### Development
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) to see the demo.
-
-### Environment
-
-The demo uses baked-in credentials for:
-- **Privy**: App ID configured in `providers.tsx`
-- **Deposit SDK**: Particle credentials and JWT worker URL bundled in SDK
+Toggle between **Modal** and **Inline** display modes in the demo UI.
 
 ## Project Structure
 
 ```
-deposit-demo/
-├── app/
-│   ├── components/
-│   │   └── DepositDemo.tsx    # Main demo component (simplified!)
-│   ├── providers.tsx          # Privy + DepositProvider
-│   ├── layout.tsx             # Root layout with providers
-│   ├── page.tsx               # Home page
-│   └── globals.css            # Tailwind styles
-├── package.json
-├── next.config.mjs            # Next.js config with webpack fallbacks
-└── README.md
+app/
+├── components/DepositDemo.tsx   # Main demo component
+├── providers.tsx                # Privy + DepositProvider setup
+├── layout.tsx                   # Root layout
+├── page.tsx                     # Home page
+└── globals.css                  # Tailwind styles
 ```
-
-## Key Components
-
-### `DepositDemo.tsx`
-
-A simplified demo component that shows the minimal integration:
-
-```tsx
-import { useDeposit, DepositModal } from '@particle-network/deposit-sdk/react';
-
-export function DepositDemo() {
-  const { login, authenticated } = usePrivy();
-  const { wallets } = useWallets();
-  const ownerAddress = wallets[0]?.address;
-
-  // This is all you need! SDK handles JWT + Auth Core internally
-  const { isConnecting, isReady, error, disconnect } = useDeposit({
-    ownerAddress: authenticated ? ownerAddress : undefined,
-  });
-
-  // ... render UI based on state
-}
-```
-
-### `providers.tsx`
-
-Wraps the app with:
-- `PrivyProvider` for user authentication
-- `DepositProvider` from the SDK (handles Auth Core internally)
-
-## Supported Chains
-
-The SDK supports deposits on 17 chains:
-- Ethereum, Optimism, BNB Chain, Polygon, Base, Arbitrum, Avalanche, Linea
-- HyperEVM, Mantle, Merlin, X Layer, Monad, Sonic, Plasma, Berachain
-- Solana
-
-## Supported Tokens
-
-- ETH, USDC, USDT, BTC, SOL, BNB
 
 ## Troubleshooting
 
-### BigInt Error
-If you see `Cannot convert a BigInt value to a number`, ensure you're using Next.js 14 (not 15+) due to Turbopack compatibility issues with WalletConnect.
+| Issue | Fix |
+|-------|-----|
+| `Cannot convert a BigInt value` | Use Next.js 14, not 15+ (Turbopack/WalletConnect issue) |
+| Deposits not detected | Check deposit address matches UA, value > $0.50, chain is supported |
+| AA24 signature error | `intermediaryAddress` mismatch — ensure it matches Auth Core address |
 
-### Deposits Not Detected
-Check the console for `[BalanceWatcher]` logs. Ensure:
-- The deposit is to the correct UA address (shown in widget)
-- The deposit value is >$0.50 USD
-- The chain is in the supported chains list
-
-### AA24 Signature Error
-This means the signature doesn't match the UA owner. Ensure `intermediaryAddress` matches the address from `useEthereum().address`.
-
-## License
-
-MIT
+See the full [SDK Reference](../sdk/docs/SDK-REFERENCE.md) for API details, supported chains/tokens, and advanced usage.

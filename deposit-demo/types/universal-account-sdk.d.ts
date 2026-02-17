@@ -10,7 +10,6 @@ declare module "@particle-network/universal-account-sdk" {
 
   export interface TradeConfig {
     slippageBps?: number;
-    universalGas?: boolean;
   }
 
   export interface UniversalAccountConfig {
@@ -30,6 +29,5 @@ declare module "@particle-network/universal-account-sdk" {
   export class UniversalAccount {
     constructor(config: UniversalAccountConfig);
     getPrimaryAssets(): Promise<PrimaryAssetsResponse>;
-    getSmartAccountOptions(): Promise<unknown>;
   }
 }
