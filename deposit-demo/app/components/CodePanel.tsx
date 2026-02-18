@@ -186,12 +186,16 @@ export const CODE_EXAMPLES = {
     language: "tsx",
     code: `// providers.tsx
 import { PrivyProvider } from "@privy-io/react-auth";
-import { DepositProvider } from "@particle-network/deposit-sdk/react";
+import { DepositProvider, CHAIN } from "@particle-network/deposit-sdk/react";
 
 export function Providers({ children }) {
   return (
     <PrivyProvider appId="your-privy-app-id">
-      <DepositProvider config={{ autoSweep: true }}>
+      <DepositProvider config={{
+        destination: { chainId: CHAIN.POLYGON },
+        autoSweep: true,
+        minValueUSD: 1,
+      }}>
         {children}
       </DepositProvider>
     </PrivyProvider>
@@ -204,14 +208,15 @@ export function Providers({ children }) {
     language: "tsx",
     code: `// Using DepositModal
 import { useState } from "react";
-import { DepositModal, CHAIN } from "@particle-network/deposit-sdk/react";
+import { useDeposit, DepositModal } from "@particle-network/deposit-sdk/react";
 
-function DepositButton() {
+function DepositButton({ ownerAddress }) {
   const [isOpen, setIsOpen] = useState(false);
+  const { isReady } = useDeposit({ ownerAddress });
 
   return (
     <>
-      <button onClick={() => setIsOpen(true)}>
+      <button onClick={() => setIsOpen(true)} disabled={!isReady}>
         Open Deposit
       </button>
 
@@ -219,7 +224,6 @@ function DepositButton() {
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
         theme="dark"
-        destination={{ chainId: CHAIN.ARBITRUM }}
       />
     </>
   );
@@ -230,17 +234,17 @@ function DepositButton() {
     label: "Inline",
     language: "tsx",
     code: `// Using DepositWidget (embedded)
-import { DepositWidget, CHAIN } from "@particle-network/deposit-sdk/react";
+import { useDeposit, DepositWidget } from "@particle-network/deposit-sdk/react";
 
-function DepositPage() {
+function DepositPage({ ownerAddress }) {
+  const { isReady } = useDeposit({ ownerAddress });
+
+  if (!isReady) return <Loading />;
+
   return (
     <div className="deposit-container">
       <h2>Deposit Funds</h2>
-
-      <DepositWidget
-        theme="dark"
-        destination={{ chainId: CHAIN.BASE }}
-      />
+      <DepositWidget theme="dark" fullWidth />
     </div>
   );
 }`,
@@ -293,10 +297,10 @@ function CustomDepositUI({ ownerAddress }) {
     label: "Events",
     language: "tsx",
     code: `// Listening to deposit events
-import { useDeposit } from "@particle-network/deposit-sdk/react";
+import { useDepositContext } from "@particle-network/deposit-sdk/react";
 
-function DepositTracker({ ownerAddress }) {
-  const { client, isReady } = useDeposit({ ownerAddress });
+function DepositTracker() {
+  const { client, isReady } = useDepositContext();
 
   useEffect(() => {
     if (!client) return;
