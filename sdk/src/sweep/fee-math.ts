@@ -20,6 +20,8 @@ interface FeeBreakdown {
   freeGasFee: boolean
   /** Whether service fee is waived */
   freeServiceFee: boolean
+  /** Raw hex strings from the UA SDK response (for logging/debugging) */
+  raw: { totalHex: string; gasHex: string; lpHex: string }
 }
 
 const EIGHTEEN_DECIMALS = 10n ** 18n
@@ -91,23 +93,38 @@ export function extractFeeBreakdown(tx: unknown): FeeBreakdown | null {
       lpFeeUSD: parseHex18ToUSD(lpHex),
       freeGasFee: totals.freeGasFee === true,
       freeServiceFee: totals.freeServiceFee === true,
+      raw: { totalHex, gasHex, lpHex },
     }
   } catch {
     return null
   }
 }
 
+/** Fallback LP fee buffer used when the probe returns no LP fee data (0.20%) */
+export const FALLBACK_LP_FEE_BUFFER = 0.002
+
 /**
- * Calculate the optimal sweep amount given a deposit value and gas fee.
+ * Derive the LP fee rate from a probe fee breakdown.
  *
- * Uses a fixed LP fee buffer (default 1.1%) instead of deriving LP rate
- * from probe data. The probe is run at $0.01 so its LP fee is unreliable
- * for extrapolation — only the gas fee (fixed cost) is used.
+ * LP fee scales proportionally with amount, so dividing the probe's LP fee
+ * by the probe amount gives the exact rate. Falls back to FALLBACK_LP_FEE_BUFFER
+ * when the probe returned zero LP fee (gasless / waived).
+ */
+export function deriveLpRate(fees: { lpFeeUSD: number }, probeAmountUSD: number): number {
+  if (fees.lpFeeUSD <= 0 || probeAmountUSD <= 0) return FALLBACK_LP_FEE_BUFFER
+  return fees.lpFeeUSD / probeAmountUSD
+}
+
+/**
+ * Calculate the optimal sweep amount given a deposit value, gas fee, and LP rate.
  *
  * Formula:
  * ```
- * optimal = (depositAmountUSD - gasFeeUSD) / (1 + lpFeeBuffer)
+ * optimal = (depositAmountUSD - gasFeeUSD) / (1 + lpRate)
  * ```
+ *
+ * The LP rate should be derived from the probe via `deriveLpRate()` rather than
+ * using a hardcoded constant, so the calculation matches what the UA will actually charge.
  *
  * Returns `null` if the deposit can't cover fees (below dust threshold).
  */
@@ -115,23 +132,23 @@ export function calculateOptimalAmount(
   depositAmountUSD: number,
   gasFeeUSD: number,
   options?: {
-    /** LP fee buffer as a fraction (default: 0.011 = 1.1%) */
-    lpFeeBuffer?: number
+    /** LP fee rate as a fraction — use deriveLpRate() to get this from probe data */
+    lpRate?: number
     /** Minimum viable sweep in USD (default: 0.01) */
     dustThreshold?: number
   }
 ): number | null {
   const {
-    lpFeeBuffer = 0.011,
+    lpRate = FALLBACK_LP_FEE_BUFFER,
     dustThreshold = 0.01,
   } = options ?? {}
 
   if (depositAmountUSD <= 0) return null
 
-  // No gas fee: return full amount (with LP buffer still applied)
-  if (gasFeeUSD <= 0) return depositAmountUSD / (1 + lpFeeBuffer)
+  // No gas fee: return full amount minus LP
+  if (gasFeeUSD <= 0) return depositAmountUSD / (1 + lpRate)
 
-  const optimal = (depositAmountUSD - gasFeeUSD) / (1 + lpFeeBuffer)
+  const optimal = (depositAmountUSD - gasFeeUSD) / (1 + lpRate)
 
   if (optimal < dustThreshold) return null
 

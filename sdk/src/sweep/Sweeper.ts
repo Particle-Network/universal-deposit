@@ -10,7 +10,7 @@
  *
  * Strategy: "low probe + fixed LP buffer"
  * 1. Probe at $0.01 USDC to extract gas fee (fixed cost)
- * 2. Calculate optimal = (deposit - gasFee) / (1 + LP_FEE_BUFFER)
+ * 2. Calculate optimal = (deposit - gasFee) / (1 + 0.0012)   — 0.12% LP buffer
  * 3. Execute with optimal amount, retry at 90% if first attempt fails
  */
 
@@ -19,7 +19,7 @@ import type { DetectedDeposit, SweepResult, AuthCoreProvider } from '../core/typ
 import { SweepError } from '../core/errors';
 import { TOKEN_ADDRESSES, CHAIN, getChainName } from '../constants';
 import { encodeERC20Transfer, toSmallestUnit } from './erc20';
-import { extractFeeBreakdown, calculateOptimalAmount } from './fee-math';
+import { extractFeeBreakdown, calculateOptimalAmount, deriveLpRate } from './fee-math';
 
 export interface SweeperConfig {
   uaManager: UAManager;
@@ -189,10 +189,20 @@ export class Sweeper {
     }
 
     const fees = extractFeeBreakdown(probeTx);
-    console.log(`[Sweeper] Step 2: Fee extraction result:`, fees === null
-      ? 'no fee data in response'
-      : `gas=$${fees.gasFeeUSD.toFixed(6)} lp=$${fees.lpFeeUSD.toFixed(6)} total=$${fees.totalFeeUSD.toFixed(6)} freeGas=${fees.freeGasFee} freeService=${fees.freeServiceFee}`
-    );
+    if (fees === null) {
+      console.log(`[Sweeper] Step 2: Fee extraction result: no fee data in response`);
+    } else {
+      const probeAmountUSD = parseFloat(PROBE_AMOUNT);
+      const derivedLpRate = fees.lpFeeUSD / probeAmountUSD;
+      const derivedLpRatePct = (derivedLpRate * 100).toFixed(4);
+      console.log(
+        `[Sweeper] Step 2: Fee breakdown (probe=$${PROBE_AMOUNT}):\n` +
+        `  gas        = $${fees.gasFeeUSD.toFixed(6)}  (${fees.raw.gasHex})  freeGasFee=${fees.freeGasFee}\n` +
+        `  lp         = $${fees.lpFeeUSD.toFixed(6)}  (${fees.raw.lpHex})  freeServiceFee=${fees.freeServiceFee}\n` +
+        `  total      = $${fees.totalFeeUSD.toFixed(6)}  (${fees.raw.totalHex})\n` +
+        `  derived LP rate = ${derivedLpRatePct}%  (will be used for optimal calculation)`
+      );
+    }
 
     // If no fee data or gasless, send at 100%
     if (fees === null || fees.totalFeeUSD === 0) {
@@ -204,15 +214,17 @@ export class Sweeper {
       return await this.signAndSend(ua, fullTx, deposit, target);
     }
 
-    // Step 3: Calculate optimal amount using gas fee + fixed LP buffer (1.1%)
-    const optimalUSD = calculateOptimalAmount(baseUSD, fees.gasFeeUSD);
+    // Step 3: Calculate optimal amount using gas fee + LP rate derived from probe
+    const probeAmountUSD = parseFloat(PROBE_AMOUNT);
+    const lpRate = deriveLpRate(fees, probeAmountUSD);
+    const optimalUSD = calculateOptimalAmount(baseUSD, fees.gasFeeUSD, { lpRate });
     if (optimalUSD === null) {
       console.log(`[Sweeper] Step 3: Deposit ($${baseUSD.toFixed(2)}) can't cover gas ($${fees.gasFeeUSD.toFixed(4)}) -> skipping target`);
       return null;
     }
 
     const efficiency = ((optimalUSD / baseUSD) * 100).toFixed(1);
-    console.log(`[Sweeper] Step 3: Optimal=$${optimalUSD.toFixed(USDC_DECIMALS)} (${efficiency}% of $${baseUSD.toFixed(2)}, gas=$${fees.gasFeeUSD.toFixed(4)})`);
+    console.log(`[Sweeper] Step 3: Optimal=$${optimalUSD.toFixed(USDC_DECIMALS)} (${efficiency}% of $${baseUSD.toFixed(2)}, gas=$${fees.gasFeeUSD.toFixed(4)}, lpRate=${(lpRate * 100).toFixed(4)}%)`);
 
     // Step 4: Execute with optimal amount (retries at 90% internally)
     return await this.executeOptimal(ua, deposit, target, receiver, optimalUSD);

@@ -24,9 +24,9 @@ function buildMockTx(opts: {
 } = {}) {
   const {
     rootHash = '0xabc123',
-    totalFeeUSD = 0.05,
+    totalFeeUSD = 0.03002,
     gasFeeUSD = 0.03,
-    lpFeeUSD = 0.02,
+    lpFeeUSD = 0.00002,  // 0.20% of $0.01 probe amount
     freeGasFee = false,
     freeServiceFee = false,
   } = opts
@@ -137,11 +137,11 @@ describe('Sweeper', () => {
       const probeArgs = mockCreateTx.mock.calls[0][0]
       expect(probeArgs.expectTokens[0].amount).toBe('0.010000')
 
-      // Second call = optimal (deposit minus gas, divided by 1.011)
-      // For $10 deposit, $0.03 gas: (10 - 0.03) / 1.011 ≈ 9.852
+      // Second call = optimal (deposit minus gas, divided by 1 + lpRate)
+      // For $10 deposit, $0.03 gas, 0.20% LP rate: (10 - 0.03) / 1.002 ≈ 9.950
       const optimalArgs = mockCreateTx.mock.calls[1][0]
       const optimalAmount = parseFloat(optimalArgs.expectTokens[0].amount)
-      expect(optimalAmount).toBeGreaterThan(9.5)
+      expect(optimalAmount).toBeGreaterThan(9.9)
       expect(optimalAmount).toBeLessThan(10)
     })
 
@@ -204,11 +204,11 @@ describe('Sweeper', () => {
       expect(result.transactionId).toBe('0xretry')
       expect(mockCreateTx).toHaveBeenCalledTimes(3)
 
-      // Third call should be at ~90% of optimal
+      // Third call should be at ~90% of optimal (9.950 * 0.90 ≈ 8.955)
       const retryArgs = mockCreateTx.mock.calls[2][0]
       const retryAmount = parseFloat(retryArgs.expectTokens[0].amount)
       expect(retryAmount).toBeLessThan(9.0)
-      expect(retryAmount).toBeGreaterThan(8.5)
+      expect(retryAmount).toBeGreaterThan(8.8)
     })
 
     it('handles non-Error objects from UA SDK (Da: prefix errors)', async () => {

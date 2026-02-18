@@ -154,11 +154,11 @@ describe('extractFeeBreakdown', () => {
 
 describe('calculateOptimalAmount', () => {
   it('calculates optimal amount for a $10 deposit with $0.03 gas', () => {
-    // optimal = (10 - 0.03) / (1 + 0.011) = 9.97 / 1.011 ≈ 9.861
+    // optimal = (10 - 0.03) / (1 + 0.002) = 9.97 / 1.002 ≈ 9.950
     const result = calculateOptimalAmount(10, 0.03)
     expect(result).not.toBeNull()
-    expect(result!).toBeCloseTo(9.97 / 1.011, 3)
-    expect(result!).toBeGreaterThan(9.8)
+    expect(result!).toBeCloseTo(9.97 / 1.002, 3)
+    expect(result!).toBeGreaterThan(9.9)
     expect(result!).toBeLessThan(10)
   })
 
@@ -170,11 +170,11 @@ describe('calculateOptimalAmount', () => {
     expect(result!).toBeLessThan(100)
   })
 
-  it('applies LP buffer even when gas fee is zero', () => {
-    // optimal = 10 / 1.011 ≈ 9.891
+  it('applies LP rate even when gas fee is zero', () => {
+    // optimal = 10 / 1.002 ≈ 9.980
     const result = calculateOptimalAmount(10, 0)
     expect(result).not.toBeNull()
-    expect(result!).toBeCloseTo(10 / 1.011, 5)
+    expect(result!).toBeCloseTo(10 / 1.002, 5)
     expect(result!).toBeLessThan(10)
   })
 
@@ -191,9 +191,9 @@ describe('calculateOptimalAmount', () => {
     expect(calculateOptimalAmount(-5, 0.03)).toBeNull()
   })
 
-  it('respects custom LP fee buffer', () => {
+  it('respects custom LP rate', () => {
     const defaultResult = calculateOptimalAmount(10, 0.03)
-    const higherBuffer = calculateOptimalAmount(10, 0.03, { lpFeeBuffer: 0.05 })
+    const higherBuffer = calculateOptimalAmount(10, 0.03, { lpRate: 0.05 })
     // Higher buffer -> smaller optimal amount
     expect(higherBuffer!).toBeLessThan(defaultResult!)
   })
