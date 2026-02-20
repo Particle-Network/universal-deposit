@@ -6,6 +6,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { IntermediaryService } from '../intermediary';
 import { JwtError, AuthenticationError } from '../core/errors';
 
+// Mock JwtVerifier so unit tests don't attempt real JWKS fetches or
+// signature verification against the dummy tokens returned by the mock fetch.
+vi.mock('../intermediary/JwtVerifier', () => ({
+  JwtVerifier: class {
+    verify(_token: string) {
+      return Promise.resolve({});
+    }
+  },
+}));
+
 describe('IntermediaryService', () => {
   const mockConfig = {
     projectId: 'test-project-id',

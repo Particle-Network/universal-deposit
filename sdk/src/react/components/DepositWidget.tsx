@@ -84,6 +84,7 @@ export function DepositWidget({
   const context = useOptionalDepositContext();
   const client = clientProp || context?.client || null;
   const hasContext = context !== null;
+  const logger = context?.logger ?? { log: () => {}, warn: () => {}, error: () => {} };
 
   // Activity: use context state when available, fallback to local for direct client prop
   const [localActivity, setLocalActivity] = useState<ActivityItem[]>([]);
@@ -144,7 +145,7 @@ export function DepositWidget({
             : addresses.evm;
         setDepositAddress(addr);
       } catch (error) {
-        console.error("Failed to get deposit address:", error);
+        logger.error("Failed to get deposit address:", error);
       }
     };
     getAddress();
@@ -166,7 +167,7 @@ export function DepositWidget({
       try {
         client.setDestination(destinationProp);
       } catch (e) {
-        console.warn('[DepositWidget] setDestination failed:', e);
+        logger.warn('[DepositWidget] setDestination failed:', e);
       }
     }
 

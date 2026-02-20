@@ -123,6 +123,7 @@ Wraps your app. Manages Auth Core context internally.
 | `minValueUSD` | `number` | `0.50` | Minimum USD value to trigger sweep |
 | `pollingIntervalMs` | `number` | `3000` | Balance check interval (ms) |
 | `refund` | `RefundConfig` | `{ enabled: false }` | Auto-refund config (experimental) |
+| `uaProjectId` | `string` | SDK default | Particle project ID for UA operations only (see [Custom Credentials](#custom-particle-credentials)) |
 
 ### useDeposit
 
@@ -261,6 +262,7 @@ const client = new DepositClient({
 | `pollingIntervalMs` | `number` | No | `3000` | Polling interval (ms) |
 | `recovery` | `RecoveryConfig` | No | — | Recovery behavior |
 | `refund` | `RefundConfig` | No | `{ enabled: false }` | Auto-refund (experimental) |
+| `uaProjectId` | `string` | No | SDK default | Particle project ID for UA operations only (see [Custom Credentials](#custom-particle-credentials)) |
 
 ### Methods
 
@@ -369,13 +371,12 @@ interface RefundResult {
   sourceChainId: number;
   amount: string;
   amountUSD: number;
-  status: 'success' | 'failed' | 'skipped';
+  status: 'pending' | 'processing' | 'success' | 'failed' | 'skipped';
   reason: RefundReason;
   txHash?: string;
   error?: string;
   refundedTo?: string;
   refundedToSender?: boolean;
-  timestamp: number;
 }
 ```
 
@@ -437,6 +438,38 @@ import {
 ---
 
 ## Advanced
+
+### Custom Particle Credentials
+
+By default the SDK uses built-in shared Particle credentials. You can supply your own project ID to scope **Universal Account operations** to your Particle project:
+
+> [!IMPORTANT]
+> `uaProjectId` only affects Universal Account operations (smart account initialization and asset queries). The intermediary wallet authentication (JWT + Auth Core session) always uses the SDK's built-in credentials — this is by design and cannot be overridden.
+
+> This is useful if you want to handle your own app fees. If you use your own project ID, deposits will be subject to a 1% fee going to Particle. Reach out to us to configure a custom rate and establish a revenue sharing model.
+
+> [!NOTE]
+> You can reach out to us at [https://t.me/particle_developer_bot](https://t.me/particle_developer_bot)
+
+```tsx
+// React
+<DepositProvider config={{
+  destination: { chainId: CHAIN.BASE },
+  uaProjectId: 'your-project-id',
+}}>
+```
+
+```typescript
+// Headless
+const client = new DepositClient({
+  ownerAddress: '0x...',
+  intermediaryAddress: '0x...',
+  destination: { chainId: CHAIN.BASE },
+  uaProjectId: 'your-project-id',
+});
+```
+
+When omitted, the SDK falls back to its shared project ID which works out of the box.
 
 ### Destination Configuration
 

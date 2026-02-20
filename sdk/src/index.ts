@@ -10,6 +10,7 @@ export type { ResolvedConfig } from './core/DepositClient';
 
 // Types
 export type {
+  Logger,
   TokenType,
   AddressType,
   DestinationConfig,

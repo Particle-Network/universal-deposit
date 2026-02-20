@@ -101,7 +101,7 @@ export function extractFeeBreakdown(tx: unknown): FeeBreakdown | null {
 }
 
 /** Fallback LP fee buffer used when the probe returns no LP fee data (0.20%) */
-export const FALLBACK_LP_FEE_BUFFER = 0.002
+const FALLBACK_LP_FEE_BUFFER = 0.002
 
 /**
  * Derive the LP fee rate from a probe fee breakdown.

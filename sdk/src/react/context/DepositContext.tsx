@@ -28,7 +28,14 @@ import type {
   RefundConfig,
   RefundReason,
   DestinationConfig,
+  Logger,
 } from "../../core/types";
+
+const NOOP_LOGGER: Logger = {
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+};
 import type { ActivityItem } from "../types";
 import {
   DEFAULT_PROJECT_ID,
@@ -81,6 +88,18 @@ export interface DepositConfig {
    * @see RefundConfig for full documentation
    */
   refund?: RefundConfig;
+  /**
+   * Optional Particle project ID for Universal Account operations.
+   * When omitted, the SDK uses its built-in shared project ID.
+   * Note: This only affects UA operations — intermediary auth always uses SDK built-in credentials.
+   */
+  uaProjectId?: string;
+
+  /**
+   * Custom logger. Defaults to silent (no output).
+   * Pass `console` to restore the original logging behaviour.
+   */
+  logger?: Logger;
 }
 
 export interface DepositContextValue {
@@ -129,6 +148,9 @@ export interface DepositContextValue {
   refundAll: (reason?: RefundReason) => Promise<RefundResult[]>;
   canRefund: (depositId: string) => Promise<{ eligible: boolean; reason?: string }>;
   refundConfig: RefundConfig | null;
+
+  // Logger (for internal use by child components/hooks)
+  logger: Logger;
 }
 
 const DepositContext = createContext<DepositContextValue | null>(null);
@@ -162,6 +184,10 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
   // when the parent passes a new object literal (e.g. config={{}}).
   const configRef = useRef(config);
   configRef.current = config;
+  // Logger ref — stable identity, reads latest value from config on each call
+  const loggerRef = useRef<Logger>(config.logger ?? NOOP_LOGGER);
+  loggerRef.current = config.logger ?? NOOP_LOGGER;
+  // IntermediaryService always uses hardcoded default credentials — never user-supplied.
   const intermediaryServiceRef = useRef<IntermediaryService>(
     new IntermediaryService({
       projectId: DEFAULT_PROJECT_ID,
@@ -429,7 +455,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
   // Handle Auth Core already being connected (persisted session)
   useEffect(() => {
     if (authCoreConnected && authCoreAddress && authCoreProvider) {
-      console.log("[DepositSDK] Auth Core already connected (persisted session)");
+      loggerRef.current.log("[DepositSDK] Auth Core already connected (persisted session)");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run on mount
@@ -443,7 +469,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       ownerAddressRef.current
     ) {
       if (!isConnected) {
-        console.log("[DepositSDK] Auth Core connected:", authCoreAddress);
+        loggerRef.current.log("[DepositSDK] Auth Core connected:", authCoreAddress);
         setIsConnected(true);
         setIsConnecting(false);
         connectingRef.current = false;
@@ -511,13 +537,13 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
         const securityAccount = userInfo?.security_account;
         if (securityAccount) {
           if (securityAccount.has_set_payment_password) {
-            console.warn(
+            loggerRef.current.warn(
               "[DepositSDK] Intermediary account has a payment password set. " +
               "Blind signing is NOT available - signing confirmation popups will appear."
             );
           }
           if (securityAccount.has_set_master_password) {
-            console.warn(
+            loggerRef.current.warn(
               "[DepositSDK] Intermediary account has a master password set. " +
               "Blind signing requires the master password to have been entered during this session."
             );
@@ -546,16 +572,18 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
           minValueUSD: cfg.minValueUSD,
           pollingIntervalMs: cfg.pollingIntervalMs,
           refund: cfg.refund,
+          uaProjectId: cfg.uaProjectId,
+          logger: loggerRef.current,
         });
 
         setupClientListeners(client);
 
-        console.log("[DepositSDK] Initializing client for", currentOwner.slice(0, 8) + "...");
+        loggerRef.current.log("[DepositSDK] Initializing client for", currentOwner.slice(0, 8) + "...");
         await client.initialize();
 
         // Effect was cleaned up while we were awaiting — destroy the orphan
         if (aborted) {
-          console.warn("[DepositSDK] Effect aborted during init, destroying orphaned client");
+          loggerRef.current.warn("[DepositSDK] Effect aborted during init, destroying orphaned client");
           client.destroy();
           return;
         }
@@ -565,7 +593,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
           disconnectingRef.current ||
           ownerAddressRef.current?.toLowerCase() !== currentOwner.toLowerCase()
         ) {
-          console.warn("[DepositSDK] Owner changed during initialization, destroying client");
+          loggerRef.current.warn("[DepositSDK] Owner changed during initialization, destroying client");
           client.destroy();
           return;
         }
@@ -574,7 +602,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
         // Check abort again after second await
         if (aborted) {
-          console.warn("[DepositSDK] Effect aborted after getDepositAddresses, destroying orphaned client");
+          loggerRef.current.warn("[DepositSDK] Effect aborted after getDepositAddresses, destroying orphaned client");
           client.destroy();
           return;
         }
@@ -587,9 +615,9 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
         setIsReady(true);
         setIsConnecting(false);
 
-        console.log("[DepositSDK] Ready. EVM:", addresses.evm.slice(0, 10) + "...");
+        loggerRef.current.log("[DepositSDK] Ready. EVM:", addresses.evm.slice(0, 10) + "...");
       } catch (err) {
-        console.error("[DepositSDK] Failed to initialize client:", err);
+        loggerRef.current.error("[DepositSDK] Failed to initialize client:", err);
         setError(err instanceof Error ? err : new Error(String(err)));
         setIsConnecting(false);
       } finally {
@@ -621,7 +649,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       if (destination) {
         pendingDestinationRef.current = destination;
       }
-      console.log("[DepositSDK] Connecting:", ownerAddress.slice(0, 10) + "...");
+      loggerRef.current.log("[DepositSDK] Connecting:", ownerAddress.slice(0, 10) + "...");
 
       // Wait for any pending connection/disconnection to complete
       if (connectionLockRef.current) {
@@ -647,15 +675,15 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
         try {
           const session = await intermediaryServiceRef.current.getSession(ownerAddress);
           if (session.intermediaryAddress.toLowerCase() === authCoreAddress.toLowerCase()) {
-            console.log("[DepositSDK] Reusing existing Auth Core session");
+            loggerRef.current.log("[DepositSDK] Reusing existing Auth Core session");
             ownerAddressRef.current = ownerAddress;
             setIsConnected(true);
             return;
           }
-          console.warn("[DepositSDK] Session mismatch, reconnecting...");
+          loggerRef.current.warn("[DepositSDK] Session mismatch, reconnecting...");
           await authCoreDisconnect();
         } catch (err) {
-          console.warn("[DepositSDK] Session validation failed, reconnecting:", err);
+          loggerRef.current.warn("[DepositSDK] Session validation failed, reconnecting:", err);
           await authCoreDisconnect();
         }
       }
@@ -679,11 +707,11 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
         // Verify we're still connecting the same address (no race condition)
         if (ownerAddressRef.current?.toLowerCase() !== ownerAddress.toLowerCase()) {
-          console.warn("[DepositSDK] Address changed during connection, aborting");
+          loggerRef.current.warn("[DepositSDK] Address changed during connection, aborting");
           return;
         }
 
-        console.log("[DepositSDK] JWT received, connecting Auth Core...");
+        loggerRef.current.log("[DepositSDK] JWT received, connecting Auth Core...");
 
         // Connect to Auth Core with JWT
         // The useEffect will handle client initialization when authCoreConnected becomes true
@@ -695,7 +723,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
         // Set a timeout to reset isConnecting if Auth Core hooks don't update
         setTimeout(() => {
           if (connectingRef.current && !authCoreConnected) {
-            console.warn("[DepositSDK] Auth Core hooks didn't update after 10s, resetting state");
+            loggerRef.current.warn("[DepositSDK] Auth Core hooks didn't update after 10s, resetting state");
             setIsConnecting(false);
             connectingRef.current = false;
           }
@@ -703,7 +731,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
         // Don't set isConnected here - let the useEffect handle it when authCoreConnected changes
       } catch (err) {
-        console.error("[DepositSDK] Connection failed:", err);
+        loggerRef.current.error("[DepositSDK] Connection failed:", err);
         // Clear session for this user on error to allow retry
         intermediaryServiceRef.current.clearSessionForUser(ownerAddress);
         setError(err instanceof Error ? err : new Error(String(err)));
@@ -857,7 +885,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
 
     try {
       const previousOwner = ownerAddressRef.current;
-      console.log("[DepositSDK] Disconnecting");
+      loggerRef.current.log("[DepositSDK] Disconnecting");
 
       // Allow any in-flight initClient to detect disconnect and self-destruct
       clientInitializingRef.current = false;
@@ -887,7 +915,7 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       setError(null);
       connectingRef.current = false;
 
-      console.log("[DepositSDK] Disconnected");
+      loggerRef.current.log("[DepositSDK] Disconnected");
     } finally {
       disconnectingRef.current = false;
       resolveLock!();
@@ -1048,6 +1076,8 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     refundAll,
     canRefund,
     refundConfig: getRefundConfig(),
+    // Logger
+    logger: loggerRef.current,
   };
 
   return (

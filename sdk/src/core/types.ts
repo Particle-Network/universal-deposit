@@ -15,6 +15,16 @@ export type AddressType = 'evm' | 'solana';
 // ============================================
 
 /**
+ * Minimal logger interface. Pass `console` to restore default output,
+ * or a custom object to redirect logs. Defaults to silent (noop).
+ */
+export interface Logger {
+  log(...args: unknown[]): void;
+  warn(...args: unknown[]): void;
+  error(...args: unknown[]): void;
+}
+
+/**
  * Auth Core provider interface for signing UA transactions
  * This is the intermediary wallet's provider from Particle Auth Core
  */
@@ -75,6 +85,14 @@ export interface DepositClientConfig {
   // Required for sweep operations
   intermediaryAddress: string;
 
+  /**
+   * Optional Particle project ID for Universal Account operations.
+   * When omitted, the SDK uses its built-in shared project ID.
+   * Note: This only affects Universal Account operations. The intermediary
+   * wallet authentication always uses the SDK's built-in credentials.
+   */
+  uaProjectId?: string;
+
   // Auth Core provider for signing UA transactions
   // This comes from useEthereum().provider in @particle-network/auth-core-modal
   // Required for sweep operations
@@ -117,6 +135,20 @@ export interface DepositClientConfig {
 
   // Advanced options (internal use)
   jwtServiceUrl?: string;
+
+  /**
+   * Custom logger. Defaults to silent (no output).
+   * Pass `console` to restore the original logging behaviour.
+   *
+   * @example
+   * // Restore full logging
+   * logger: console
+   *
+   * @example
+   * // Redirect to your own logger
+   * logger: { log: myLogger.debug, warn: myLogger.warn, error: myLogger.error }
+   */
+  logger?: Logger;
 }
 
 // ============================================

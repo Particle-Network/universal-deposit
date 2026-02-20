@@ -10,6 +10,7 @@
 import { JwtError, AuthenticationError } from '../core/errors';
 import type { JwtResponse, IntermediarySession } from '../core/types';
 import { DEFAULT_JWT_SERVICE_URL } from '../constants';
+import { JwtVerifier } from './JwtVerifier';
 
 interface IntermediaryConfig {
   projectId: string;
@@ -20,6 +21,7 @@ interface IntermediaryConfig {
 
 export class IntermediaryService {
   private config: IntermediaryConfig;
+  private verifier: JwtVerifier;
 
   // Per-user session cache to prevent session mixing between different users
   private sessions: Map<string, IntermediarySession> = new Map();
@@ -30,6 +32,7 @@ export class IntermediaryService {
       ...config,
       jwtServiceUrl: config.jwtServiceUrl || DEFAULT_JWT_SERVICE_URL,
     };
+    this.verifier = new JwtVerifier(`${this.config.jwtServiceUrl}/.well-known/jwks.json`);
   }
 
   /**
@@ -197,6 +200,18 @@ export class IntermediaryService {
 
     if (!data.jwt) {
       throw new JwtError('JWT service did not return a valid token');
+    }
+
+    // Verify the token's signature and claims using the JWKS endpoint.
+    // This prevents accepting a tampered or forged JWT even if the worker
+    // is compromised or the request is intercepted.
+    try {
+      await this.verifier.verify(data.jwt);
+    } catch (err) {
+      throw new JwtError(
+        `JWT verification failed: ${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
     }
 
     return data;

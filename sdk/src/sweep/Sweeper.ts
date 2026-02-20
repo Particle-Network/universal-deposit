@@ -15,11 +15,17 @@
  */
 
 import type { UAManager } from '../universal-account';
-import type { DetectedDeposit, SweepResult, AuthCoreProvider } from '../core/types';
+import type { DetectedDeposit, SweepResult, AuthCoreProvider, Logger } from '../core/types';
 import { SweepError } from '../core/errors';
 import { TOKEN_ADDRESSES, CHAIN, getChainName } from '../constants';
 import { encodeERC20Transfer, toSmallestUnit } from './erc20';
 import { extractFeeBreakdown, calculateOptimalAmount, deriveLpRate } from './fee-math';
+
+const NOOP_LOGGER: Logger = {
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+};
 
 export interface SweeperConfig {
   uaManager: UAManager;
@@ -28,6 +34,7 @@ export interface SweeperConfig {
    *  runtime destination changes are picked up even when a sweep
    *  was queued before the change. */
   getDestination: () => { address: string; chainId: number };
+  logger?: Logger;
 }
 
 export interface SweepAttempt {
@@ -82,12 +89,14 @@ function formatError(error: unknown): string {
 
 export class Sweeper {
   private config: SweeperConfig;
+  private readonly logger: Logger;
   private sweepQueue: Promise<void> = Promise.resolve();
   private sweeping = false;
   private pendingCount = 0;
 
   constructor(config: SweeperConfig) {
     this.config = config;
+    this.logger = config.logger ?? NOOP_LOGGER;
   }
 
   /**
@@ -101,7 +110,7 @@ export class Sweeper {
         .then(async () => {
           this.sweeping = true;
           try {
-            console.log(`[Sweeper] Starting sweep: ${deposit.token} on chain ${deposit.chainId}`);
+            this.logger.log(`[Sweeper] Starting sweep: ${deposit.token} on chain ${deposit.chainId}`);
             const result = await this.executeSweep(deposit);
             resolve(result);
           } catch (error) {
@@ -133,8 +142,8 @@ export class Sweeper {
     const ua = this.config.uaManager.getUniversalAccount() as any;
     const { chainId: targetChainId, address: receiver } = this.config.getDestination();
 
-    console.log(`[Sweeper] Destination: ${getChainName(targetChainId)} (${targetChainId}) -> ${receiver}`);
-    console.log(`[Sweeper] Deposit: ${deposit.token} on chain ${deposit.chainId}, $${deposit.amountUSD?.toFixed(2) ?? '?'}`);
+    this.logger.log(`[Sweeper] Destination: ${getChainName(targetChainId)} (${targetChainId}) -> ${receiver}`);
+    this.logger.log(`[Sweeper] Deposit: ${deposit.token} on chain ${deposit.chainId}, $${deposit.amountUSD?.toFixed(2) ?? '?'}`);
 
     const targets = this.buildSweepTargets(deposit, targetChainId);
 
@@ -149,10 +158,10 @@ export class Sweeper {
       try {
         const result = await this.probeFeesAndExecute(ua, deposit, target, receiver);
         if (result) return result;
-        console.log(`[Sweeper] Target ${target.label} returned null (fees too high), trying next`);
+        this.logger.log(`[Sweeper] Target ${target.label} returned null (fees too high), trying next`);
       } catch (error) {
         if (isAbortError(error)) throw error;
-        console.warn(`[Sweeper] Target ${target.label} failed:`, formatError(error));
+        this.logger.warn(`[Sweeper] Target ${target.label} failed:`, formatError(error));
       }
     }
 
@@ -175,8 +184,8 @@ export class Sweeper {
     if (!target.tokenAddress) return null;
 
     // Step 1: Probe at $0.01 to extract gas fee (fixed cost, doesn't scale with amount)
-    console.log(`[Sweeper] Step 1: Probing fees at $${PROBE_AMOUNT} for ${target.label} -> chain ${target.chainId}`);
-    console.log(`[Sweeper]   deposit=$${baseUSD.toFixed(2)}, token=${target.tokenAddress}`);
+    this.logger.log(`[Sweeper] Step 1: Probing fees at $${PROBE_AMOUNT} for ${target.label} -> chain ${target.chainId}`);
+    this.logger.log(`[Sweeper]   deposit=$${baseUSD.toFixed(2)}, token=${target.tokenAddress}`);
 
     let probeTx;
     try {
@@ -184,18 +193,18 @@ export class Sweeper {
         ua, target.chainId, target.tokenAddress, PROBE_AMOUNT, receiver
       );
     } catch (probeError) {
-      console.warn(`[Sweeper] Probe at $${PROBE_AMOUNT} FAILED:`, formatError(probeError));
+      this.logger.warn(`[Sweeper] Probe at $${PROBE_AMOUNT} FAILED:`, formatError(probeError));
       throw probeError;
     }
 
     const fees = extractFeeBreakdown(probeTx);
     if (fees === null) {
-      console.log(`[Sweeper] Step 2: Fee extraction result: no fee data in response`);
+      this.logger.log(`[Sweeper] Step 2: Fee extraction result: no fee data in response`);
     } else {
       const probeAmountUSD = parseFloat(PROBE_AMOUNT);
       const derivedLpRate = fees.lpFeeUSD / probeAmountUSD;
       const derivedLpRatePct = (derivedLpRate * 100).toFixed(4);
-      console.log(
+      this.logger.log(
         `[Sweeper] Step 2: Fee breakdown (probe=$${PROBE_AMOUNT}):\n` +
         `  gas        = $${fees.gasFeeUSD.toFixed(6)}  (${fees.raw.gasHex})  freeGasFee=${fees.freeGasFee}\n` +
         `  lp         = $${fees.lpFeeUSD.toFixed(6)}  (${fees.raw.lpHex})  freeServiceFee=${fees.freeServiceFee}\n` +
@@ -206,7 +215,7 @@ export class Sweeper {
 
     // If no fee data or gasless, send at 100%
     if (fees === null || fees.totalFeeUSD === 0) {
-      console.log(`[Sweeper] ${fees === null ? 'No fee data' : 'Gasless'} -> rebuilding at 100% ($${baseUSD.toFixed(USDC_DECIMALS)})`);
+      this.logger.log(`[Sweeper] ${fees === null ? 'No fee data' : 'Gasless'} -> rebuilding at 100% ($${baseUSD.toFixed(USDC_DECIMALS)})`);
       const fullAmount = baseUSD.toFixed(USDC_DECIMALS);
       const fullTx = await this.buildUniversalTransaction(
         ua, target.chainId, target.tokenAddress, fullAmount, receiver
@@ -219,12 +228,12 @@ export class Sweeper {
     const lpRate = deriveLpRate(fees, probeAmountUSD);
     const optimalUSD = calculateOptimalAmount(baseUSD, fees.gasFeeUSD, { lpRate });
     if (optimalUSD === null) {
-      console.log(`[Sweeper] Step 3: Deposit ($${baseUSD.toFixed(2)}) can't cover gas ($${fees.gasFeeUSD.toFixed(4)}) -> skipping target`);
+      this.logger.log(`[Sweeper] Step 3: Deposit ($${baseUSD.toFixed(2)}) can't cover gas ($${fees.gasFeeUSD.toFixed(4)}) -> skipping target`);
       return null;
     }
 
     const efficiency = ((optimalUSD / baseUSD) * 100).toFixed(1);
-    console.log(`[Sweeper] Step 3: Optimal=$${optimalUSD.toFixed(USDC_DECIMALS)} (${efficiency}% of $${baseUSD.toFixed(2)}, gas=$${fees.gasFeeUSD.toFixed(4)}, lpRate=${(lpRate * 100).toFixed(4)}%)`);
+    this.logger.log(`[Sweeper] Step 3: Optimal=$${optimalUSD.toFixed(USDC_DECIMALS)} (${efficiency}% of $${baseUSD.toFixed(2)}, gas=$${fees.gasFeeUSD.toFixed(4)}, lpRate=${(lpRate * 100).toFixed(4)}%)`);
 
     // Step 4: Execute with optimal amount (retries at 90% internally)
     return await this.executeOptimal(ua, deposit, target, receiver, optimalUSD);
@@ -244,7 +253,7 @@ export class Sweeper {
   ): Promise<SweepResult> {
     const tokenAddr = target.tokenAddress!; // Caller guards with if (!target.tokenAddress)
     const optimalHuman = optimalUSD.toFixed(USDC_DECIMALS);
-    console.log(`[Sweeper] Step 4a: Building tx at optimal $${optimalHuman}`);
+    this.logger.log(`[Sweeper] Step 4a: Building tx at optimal $${optimalHuman}`);
     try {
       const optimalTx = await this.buildUniversalTransaction(
         ua, target.chainId, tokenAddr, optimalHuman, receiver
@@ -255,10 +264,10 @@ export class Sweeper {
 
       // Retry at 90% of optimal
       const retryUSD = optimalUSD * PROBE_RETRY_FACTOR;
-      console.warn(`[Sweeper] Step 4a FAILED: ${formatError(executeError)}`);
-      console.log(`[Sweeper] Step 4b: Retrying at ${PROBE_RETRY_FACTOR * 100}% -> $${retryUSD.toFixed(USDC_DECIMALS)}`);
+      this.logger.warn(`[Sweeper] Step 4a FAILED: ${formatError(executeError)}`);
+      this.logger.log(`[Sweeper] Step 4b: Retrying at ${PROBE_RETRY_FACTOR * 100}% -> $${retryUSD.toFixed(USDC_DECIMALS)}`);
       if (retryUSD < 0.01) {
-        console.log(`[Sweeper] Retry amount $${retryUSD.toFixed(USDC_DECIMALS)} below dust, giving up`);
+        this.logger.log(`[Sweeper] Retry amount $${retryUSD.toFixed(USDC_DECIMALS)} below dust, giving up`);
         throw executeError;
       }
 
@@ -308,7 +317,7 @@ export class Sweeper {
       throw err;
     }
 
-    console.log(`[Sweeper] Success! Swept to ${target.label}`);
+    this.logger.log(`[Sweeper] Success! Swept to ${target.label}`);
 
     return {
       depositId: deposit.id,

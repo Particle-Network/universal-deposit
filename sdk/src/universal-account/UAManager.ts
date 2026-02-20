@@ -19,6 +19,8 @@ import {
 export interface UAManagerConfig {
   ownerAddress: string;
   session: IntermediarySession;
+  /** Optional project ID override for UA operations. Defaults to SDK built-in. */
+  projectId?: string;
 }
 
 export interface SmartAccountOptions {
@@ -66,7 +68,7 @@ export class UAManager {
 
     try {
       this.ua = new UniversalAccount({
-        projectId: DEFAULT_PROJECT_ID,
+        projectId: this.config.projectId ?? DEFAULT_PROJECT_ID,
         projectClientKey: DEFAULT_CLIENT_KEY,
         projectAppUuid: DEFAULT_APP_ID,
         ownerAddress: this.config.session.intermediaryAddress,

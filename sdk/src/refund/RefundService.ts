@@ -17,15 +17,23 @@ import type {
   RefundReason,
   DepositOrigin,
   UATransaction,
+  Logger,
 } from '../core/types';
 import { RefundError } from '../core/errors';
 import { TOKEN_ADDRESSES, CHAIN, getTokenDecimals, getAddressType, getChainName, isValidEvmAddress, isValidSolanaAddress } from '../constants';
+
+const NOOP_LOGGER: Logger = {
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+};
 
 export interface RefundServiceConfig {
   uaManager: UAManager;
   authCoreProvider?: AuthCoreProvider;
   ownerAddress: string;
   refundConfig: Required<RefundConfig>;
+  logger?: Logger;
 }
 
 export interface RefundEligibility {
@@ -47,10 +55,12 @@ export const DEFAULT_REFUND_CONFIG: Required<RefundConfig> = {
 
 export class RefundService {
   private config: RefundServiceConfig;
+  private readonly logger: Logger;
   private refundLock = false;
 
   constructor(config: RefundServiceConfig) {
     this.config = config;
+    this.logger = config.logger ?? NOOP_LOGGER;
   }
 
   /**
@@ -99,7 +109,7 @@ export class RefundService {
         transactionId: match.transactionId,
       };
     } catch (error) {
-      console.warn('[RefundService] Failed to find deposit origin:', error);
+      this.logger.warn('[RefundService] Failed to find deposit origin:', error);
       return null;
     }
   }
@@ -139,7 +149,7 @@ export class RefundService {
           refundAddress = origin.senderAddress;
           isOriginalSender = true;
         } else {
-          console.warn(
+          this.logger.warn(
             `[RefundService] Sender address type (${senderAddressType}) doesn't match source chain type (${sourceAddressType}). Using owner address.`
           );
         }
@@ -179,7 +189,7 @@ export class RefundService {
     this.refundLock = true;
 
     try {
-      console.log(`[RefundService] Starting refund: ${deposit.token} on chain ${deposit.chainId}, reason: ${reason}`);
+      this.logger.log(`[RefundService] Starting refund: ${deposit.token} on chain ${deposit.chainId}, reason: ${reason}`);
 
       // Check eligibility
       const eligibility = await this.checkRefundEligibility(deposit);
@@ -200,7 +210,7 @@ export class RefundService {
       const refundAddress = eligibility.refundAddress!;
       const isOriginalSender = eligibility.isOriginalSender || false;
 
-      console.log(
+      this.logger.log(
         `[RefundService] Refunding to ${isOriginalSender ? 'original sender' : 'owner'}: ${refundAddress}`
       );
 
@@ -239,7 +249,7 @@ export class RefundService {
       if (tryAmount < 1000n) continue;
 
       try {
-        console.log(`[RefundService] Attempting refund at ${pct}%`);
+        this.logger.log(`[RefundService] Attempting refund at ${pct}%`);
 
         // Format amount for SDK
         const decimals = this.getDecimals(deposit.token, sourceChainId);
@@ -267,7 +277,7 @@ export class RefundService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (ua as any).sendTransaction(tx, signature);
 
-        console.log(`[RefundService] Success! Refunded ${pct}% to ${refundAddress}`);
+        this.logger.log(`[RefundService] Success! Refunded ${pct}% to ${refundAddress}`);
 
         return {
           depositId: deposit.id,
@@ -280,7 +290,7 @@ export class RefundService {
           reason,
         };
       } catch (error) {
-        console.warn(`[RefundService] Failed refund attempt (${pct}%):`, error);
+        this.logger.warn(`[RefundService] Failed refund attempt (${pct}%):`, error);
         // Continue to next percentage
       }
     }

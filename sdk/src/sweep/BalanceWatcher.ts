@@ -6,7 +6,7 @@
  */
 
 import type { UAManager, PrimaryAssetsResponse } from '../universal-account';
-import type { DetectedDeposit, TokenType } from '../core/types';
+import type { DetectedDeposit, TokenType, Logger } from '../core/types';
 import { TypedEventEmitter } from '../core/EventEmitter';
 import { meetsMinimumDeposit, isAboveDustThreshold } from '../constants/tokens';
 
@@ -22,6 +22,7 @@ export interface BalanceWatcherConfig {
   minValueUSD: number;
   supportedTokens: string[];
   supportedChains: number[];
+  logger?: Logger;
 }
 
 type BalanceWatcherEvents = {
@@ -52,7 +53,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
   private detectionSuppressed = false;
 
   constructor(config: BalanceWatcherConfig) {
-    super();
+    super(config.logger);
     this.config = config;
   }
 
@@ -75,7 +76,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
     // Do initial poll immediately
     void this.poll();
 
-    console.log('[BalanceWatcher] Started watching with interval:', this.config.pollingIntervalMs);
+    this.logger.log('[BalanceWatcher] Started watching with interval:', this.config.pollingIntervalMs);
   }
 
   /**
@@ -87,7 +88,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
       this.pollingInterval = null;
     }
     this.isWatching = false;
-    console.log('[BalanceWatcher] Stopped watching');
+    this.logger.log('[BalanceWatcher] Stopped watching');
   }
 
   /**
@@ -156,7 +157,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
         this.processingKeys.delete(key);
       }
 
-      console.warn(`[BalanceWatcher] Cleaned up ${toRemove.length} stale processing keys`);
+      this.logger.warn(`[BalanceWatcher] Cleaned up ${toRemove.length} stale processing keys`);
     }
   }
 
@@ -242,7 +243,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
       // Always update snapshot so next poll compares against fresh data
       this.lastSnapshot = currentSnapshot;
     } catch (error) {
-      console.warn('[BalanceWatcher] Polling error:', error);
+      this.logger.warn('[BalanceWatcher] Polling error:', error);
       this.emit('error', error instanceof Error ? error : new Error(String(error)));
     }
   }
@@ -266,7 +267,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
       if (amount > 0n && meetsMinimumDeposit(amount, tokenType, chainId)) {
         if (this.processingKeys.has(key)) continue;
 
-        console.log(`[BalanceWatcher] Existing balance: ${tokenType.toUpperCase()} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
+        this.logger.log(`[BalanceWatcher] Existing balance: ${tokenType.toUpperCase()} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
 
         this.processingKeys.set(key, Date.now());
         this.emit('deposit:detected', {
@@ -281,7 +282,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
       } else if (amount > 0n && !meetsMinimumDeposit(amount, tokenType, chainId)) {
         if (this.belowThresholdKeys.has(key)) continue;
 
-        console.log(`[BalanceWatcher] Below threshold: ${tokenType.toUpperCase()} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
+        this.logger.log(`[BalanceWatcher] Below threshold: ${tokenType.toUpperCase()} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
 
         this.belowThresholdKeys.add(key);
         this.emit('deposit:below_threshold', {
@@ -355,7 +356,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
 
       // Only detect increases above per-token minimum
       if (meetsMinimumDeposit(deltaAmount, tokenType, chainId)) {
-        console.log(`[BalanceWatcher] New deposit: ${tokenType.toUpperCase()} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
+        this.logger.log(`[BalanceWatcher] New deposit: ${tokenType.toUpperCase()} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
 
         deposits.push({
           id: `${key}:${Date.now()}`,

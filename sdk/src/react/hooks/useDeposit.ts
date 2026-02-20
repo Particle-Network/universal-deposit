@@ -40,7 +40,7 @@ export interface UseDepositReturn extends DepositContextValue {}
 export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
   const { ownerAddress, destination } = options;
   const context = useDepositContext();
-  const { isConnected, isConnecting, isReady, connect, disconnect, setDestination } = context;
+  const { isConnected, isConnecting, isReady, connect, disconnect, setDestination, logger } = context;
   const operationRef = useRef<Promise<void> | null>(null);
   const lastAddressRef = useRef<string | undefined>(undefined);
   const pendingAddressRef = useRef<string | undefined>(undefined);
@@ -113,10 +113,10 @@ export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
     };
 
     handleAddressChange().catch((err) => {
-      console.error('[useDeposit] Address change failed:', err);
+      logger.error('[useDeposit] Address change failed:', err);
       operationRef.current = null;
     });
-  }, [ownerAddress, isConnected, isConnecting, connect, disconnect, normalizeAddress]);
+  }, [ownerAddress, isConnected, isConnecting, connect, disconnect, normalizeAddress, logger]);
 
   // Sync destination to SDK when it changes
   useEffect(() => {
@@ -124,9 +124,9 @@ export function useDeposit(options: UseDepositOptions = {}): UseDepositReturn {
     try {
       setDestination(destination);
     } catch (e) {
-      console.warn('[useDeposit] setDestination failed:', e);
+      logger.warn('[useDeposit] setDestination failed:', e);
     }
-  }, [destination?.chainId, destination?.address, isReady, setDestination]);
+  }, [destination?.chainId, destination?.address, isReady, setDestination, logger]);
 
   return context;
 }

@@ -2,11 +2,24 @@
  * Typed EventEmitter for deposit lifecycle events
  */
 
+import type { Logger } from './types';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type EventMap = Record<string, (...args: any[]) => void>;
 
+const NOOP_LOGGER: Logger = {
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+};
+
 export class TypedEventEmitter<T extends EventMap = EventMap> {
   private listeners: Map<keyof T, Set<T[keyof T]>> = new Map();
+  protected readonly logger: Logger;
+
+  constructor(logger?: Logger) {
+    this.logger = logger ?? NOOP_LOGGER;
+  }
 
   on<K extends keyof T>(event: K, listener: T[K]): this {
     if (!this.listeners.has(event)) {
@@ -41,7 +54,7 @@ export class TypedEventEmitter<T extends EventMap = EventMap> {
       try {
         (listener as (...args: any[]) => void)(...args);
       } catch (error) {
-        console.error(`Error in event listener for "${String(event)}":`, error);
+        this.logger.error(`Error in event listener for "${String(event)}":`, error);
       }
     });
     return true;

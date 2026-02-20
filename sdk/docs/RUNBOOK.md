@@ -56,6 +56,15 @@ npm publish --access public
 2. Verify network connectivity
 3. Check for rate limiting (429 errors)
 
+### Issue: JWT Verification Fails
+**Symptoms**: `JwtError: JWT verification failed: ...`
+**Cause**: The token returned by the JWT worker failed client-side signature verification
+**Resolution**:
+1. Confirm the JWKS endpoint is reachable: `https://deposit-auth-worker.deposit-kit.workers.dev/.well-known/jwks.json`
+2. If the worker recently rotated keys, the JWKS cache may be stale — the SDK refreshes it automatically on a `kid` miss; a hard client reload clears it
+3. If you see `JWT has expired`, the token TTL is shorter than the round-trip to the signing endpoint — check for clock skew on the client device
+4. `JWT signature verification failed` indicates a genuinely tampered token — treat as a security event
+
 ### Issue: Session Mixing Between Users
 **Symptoms**: User A receives funds meant for User B
 **Cause**: Session cache not cleared on disconnect
@@ -116,6 +125,9 @@ await client.sweep();
 | `supportedTokens` | ETH, USDC, USDT, BTC, SOL, BNB | Tokens to watch |
 | `supportedChains` | [1, 10, 42161, ...] | Chains to monitor (17 chains) |
 | `refund.enabled` | false | Auto-refund on sweep failure (experimental) |
+| `projectId` | SDK built-in | Particle project ID (omit for shared credentials) |
+| `clientKey` | SDK built-in | Particle client key |
+| `appId` | SDK built-in | Particle app ID |
 
 ## Support Contacts
 
