@@ -1,4 +1,4 @@
-# Deposit SDK
+# Universal Deposit SDK — API Reference
 
 Accept deposits from any chain. Funds are automatically detected and swept to your configured destination.
 
@@ -7,15 +7,15 @@ Accept deposits from any chain. Funds are automatically detected and swept to yo
 ### Install
 
 ```bash
-npm install @particle-network/deposit-sdk
+npm install @particle-network/universal-deposit
 ```
 
 ### Setup
 
-Wrap your app with `DepositProvider` inside your auth provider:
+Wrap your app with `DepositProvider`:
 
 ```tsx
-import { DepositProvider, CHAIN } from '@particle-network/deposit-sdk/react';
+import { DepositProvider, CHAIN } from '@particle-network/universal-deposit/react';
 
 function App() {
   return (
@@ -35,7 +35,7 @@ function App() {
 ### Modal
 
 ```tsx
-import { useDeposit, DepositModal, CHAIN } from '@particle-network/deposit-sdk/react';
+import { useDeposit, DepositModal, CHAIN } from '@particle-network/universal-deposit/react';
 
 function Page() {
   const { address } = useYourWallet();
@@ -54,7 +54,7 @@ function Page() {
 ### Inline
 
 ```tsx
-import { useDeposit, DepositWidget } from '@particle-network/deposit-sdk/react';
+import { useDeposit, DepositWidget } from '@particle-network/universal-deposit/react';
 
 function Page() {
   const { address } = useYourWallet();
@@ -70,7 +70,7 @@ function Page() {
 Use `useDeposit` directly for full control over the UI:
 
 ```tsx
-import { useDeposit, getChainName } from '@particle-network/deposit-sdk/react';
+import { useDeposit, getChainName } from '@particle-network/universal-deposit/react';
 
 function Page() {
   const { address } = useYourWallet();
@@ -237,7 +237,7 @@ Modal wrapper around `RecoveryWidget`. Accepts all `RecoveryWidgetProps` plus:
 For headless / non-React usage.
 
 ```typescript
-import { DepositClient, CHAIN } from '@particle-network/deposit-sdk';
+import { DepositClient, CHAIN } from '@particle-network/universal-deposit';
 
 const client = new DepositClient({
   ownerAddress: '0x...',
@@ -399,7 +399,7 @@ interface DepositAddresses { evm: string; solana: string; }
 ### CHAIN
 
 ```typescript
-import { CHAIN } from '@particle-network/deposit-sdk';
+import { CHAIN } from '@particle-network/universal-deposit';
 
 CHAIN.ETHEREUM   // 1       CHAIN.MANTLE     // 5000
 CHAIN.OPTIMISM   // 10      CHAIN.MERLIN     // 4200
@@ -419,7 +419,7 @@ import {
   DEFAULT_SUPPORTED_TOKENS,       // ['ETH', 'USDC', 'USDT', 'BTC', 'SOL', 'BNB']
   DEFAULT_MIN_VALUE_USD,           // 0.50
   DEFAULT_POLLING_INTERVAL_MS,     // 3000
-} from '@particle-network/deposit-sdk';
+} from '@particle-network/universal-deposit';
 ```
 
 ### Chain Utilities
@@ -432,7 +432,7 @@ import {
   isValidEvmAddress,         // Validates 0x + 40 hex chars
   isValidSolanaAddress,      // Validates base58 format
   validateAddressForChain,   // Validates address format for chain type
-} from '@particle-network/deposit-sdk';
+} from '@particle-network/universal-deposit';
 ```
 
 ---
@@ -541,7 +541,7 @@ import {
   SweepError,            // Sweep failed
   RefundError,           // Refund failed
   NetworkError,          // Network issues
-} from '@particle-network/deposit-sdk';
+} from '@particle-network/universal-deposit';
 ```
 
 ```typescript
