@@ -1,16 +1,17 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { PrivyProvider } from "@privy-io/react-auth";
-import { DepositProvider } from "@particle-network/deposit-sdk/react";
+import { DepositProvider, CHAIN } from "@particle-network/deposit-sdk/react";
 
-const PRIVY_APP_ID = "cmj91pslf03c3l50ckh4d8ff9";
+const PRIVY_APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID!;
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({ children }: { children: ReactNode }) {
   return (
     <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
-        loginMethods: ["email", "wallet", "google"],
+        loginMethods: ["email", "google"],
         appearance: {
           theme: "dark",
           accentColor: "#3B82F6",
@@ -22,7 +23,18 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
       }}
     >
-      <DepositProvider config={{ autoSweep: true }}>{children}</DepositProvider>
+      <DepositProvider
+        config={{
+          destination: {
+            chainId: CHAIN.POLYGON,
+            // address: "CUSTOM_DESTINATION_ADDRESS", // Default: User's connected wallet address
+          },
+          autoSweep: true,
+          minValueUSD: 1,
+        }}
+      >
+        {children}
+      </DepositProvider>
     </PrivyProvider>
   );
 }

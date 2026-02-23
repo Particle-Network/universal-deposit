@@ -9,16 +9,25 @@
 
 import { UniversalAccount } from '@particle-network/universal-account-sdk';
 import { UniversalAccountError } from '../core/errors';
-import type { DepositAddresses, IntermediarySession } from '../core/types';
+import type { DepositAddresses, IntermediarySession, UATransaction, Logger } from '../core/types';
 import {
   DEFAULT_PROJECT_ID,
   DEFAULT_CLIENT_KEY,
   DEFAULT_APP_ID,
 } from '../constants';
 
+const NOOP_LOGGER: Logger = {
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+};
+
 export interface UAManagerConfig {
   ownerAddress: string;
   session: IntermediarySession;
+  /** Optional project ID override for UA operations. Defaults to SDK built-in. */
+  projectId?: string;
+  logger?: Logger;
 }
 
 export interface SmartAccountOptions {
@@ -26,7 +35,7 @@ export interface SmartAccountOptions {
   solanaSmartAccount: string;
 }
 
-export interface ChainAggregationItem {
+interface ChainAggregationItem {
   token?: {
     chainId: number;
     [key: string]: unknown;
@@ -49,10 +58,12 @@ export class UAManager {
   private ua: UniversalAccount | null = null;
   private depositAddresses: DepositAddresses | null = null;
   private config: UAManagerConfig;
+  private readonly logger: Logger;
   private initialized = false;
 
   constructor(config: UAManagerConfig) {
     this.config = config;
+    this.logger = config.logger ?? NOOP_LOGGER;
   }
 
   /**
@@ -65,12 +76,8 @@ export class UAManager {
     }
 
     try {
-      // Create UA instance using the intermediary address (from JWT)
-      // The intermediary address is the "owner" of the UA
-      console.log('[UAManager] Creating UA with intermediary address:', this.config.session.intermediaryAddress);
-      
       this.ua = new UniversalAccount({
-        projectId: DEFAULT_PROJECT_ID,
+        projectId: this.config.projectId ?? DEFAULT_PROJECT_ID,
         projectClientKey: DEFAULT_CLIENT_KEY,
         projectAppUuid: DEFAULT_APP_ID,
         ownerAddress: this.config.session.intermediaryAddress,
@@ -89,12 +96,6 @@ export class UAManager {
       };
 
       this.initialized = true;
-
-      console.log('[UAManager] Initialized:', {
-        intermediaryAddress: this.config.session.intermediaryAddress,
-        evmDepositAddress: this.depositAddresses.evm,
-        solanaDepositAddress: this.depositAddresses.solana,
-      });
     } catch (error) {
       throw new UniversalAccountError(
         `Failed to initialize Universal Account: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -151,6 +152,47 @@ export class UAManager {
    */
   isInitialized(): boolean {
     return this.initialized;
+  }
+
+  /**
+   * Get transaction history from the Universal Account
+   * @param page - Page number (1-indexed)
+   * @param pageSize - Number of transactions per page
+   * @returns Array of transactions ordered by most recent
+   */
+  async getTransactions(page: number = 1, pageSize: number = 10): Promise<UATransaction[]> {
+    if (!this.ua) {
+      throw new UniversalAccountError('UAManager not initialized. Call initialize() first.');
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = await (this.ua as any).getTransactions(page, pageSize);
+
+      // Handle different response formats from the UA SDK
+      // Response could be: array, { result: { data: [] } }, { data: [] }, etc.
+      if (Array.isArray(response)) {
+        return response;
+      }
+      // JSON-RPC wrapped response: { result: { data: [...] } }
+      if (response?.result?.data && Array.isArray(response.result.data)) {
+        return response.result.data;
+      }
+      if (response?.data && Array.isArray(response.data)) {
+        return response.data;
+      }
+      if (response?.transactions && Array.isArray(response.transactions)) {
+        return response.transactions;
+      }
+
+      this.logger.warn('[UAManager] Unexpected getTransactions response format:', response);
+      return [];
+    } catch (error) {
+      throw new UniversalAccountError(
+        `Failed to get transactions: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        error
+      );
+    }
   }
 
   /**

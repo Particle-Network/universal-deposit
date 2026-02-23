@@ -1,1 +1,1 @@
-export { IntermediaryService, type IntermediaryConfig } from './IntermediaryService';
+export { IntermediaryService } from './IntermediaryService';

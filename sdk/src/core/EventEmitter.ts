@@ -2,17 +2,44 @@
  * Typed EventEmitter for deposit lifecycle events
  */
 
+import type { Logger } from './types';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type EventMap = Record<string, (...args: any[]) => void>;
+type EventMap = Record<string, (...args: any[]) => void>;
+
+const NOOP_LOGGER: Logger = {
+  log: () => {},
+  warn: () => {},
+  error: () => {},
+};
+
+const DEFAULT_MAX_LISTENERS = 20;
 
 export class TypedEventEmitter<T extends EventMap = EventMap> {
   private listeners: Map<keyof T, Set<T[keyof T]>> = new Map();
+  private maxListeners: number = DEFAULT_MAX_LISTENERS;
+  protected readonly logger: Logger;
+
+  constructor(logger?: Logger) {
+    this.logger = logger ?? NOOP_LOGGER;
+  }
+
+  setMaxListeners(n: number): this {
+    this.maxListeners = n;
+    return this;
+  }
 
   on<K extends keyof T>(event: K, listener: T[K]): this {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
-    this.listeners.get(event)!.add(listener);
+    const set = this.listeners.get(event)!;
+    set.add(listener);
+    if (set.size > this.maxListeners) {
+      this.logger.warn(
+        `[EventEmitter] Possible memory leak: ${set.size} listeners for "${String(event)}" (max ${this.maxListeners}). Use setMaxListeners() to increase.`
+      );
+    }
     return this;
   }
 
@@ -41,7 +68,7 @@ export class TypedEventEmitter<T extends EventMap = EventMap> {
       try {
         (listener as (...args: any[]) => void)(...args);
       } catch (error) {
-        console.error(`Error in event listener for "${String(event)}":`, error);
+        this.logger.error(`Error in event listener for "${String(event)}":`, error);
       }
     });
     return true;

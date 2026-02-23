@@ -1,126 +1,163 @@
-# Deposit Widget
+# Universal Deposit SDK
 
-> A complete deposit solution leveraging Universal Accounts with SDK and pre-built UI components.
+> Cross-chain deposit infrastructure powered by [Particle Network](https://particle.network) Universal Accounts. Accept deposits on multiple chains with automatic detection and bridge to your configured destination.
 
-## 📦 What's Inside
+## What's Inside
 
 This monorepo contains:
 
-- **[`/sdk`](./sdk)** — The Deposit SDK with full documentation
+- **[`/sdk`](./sdk)** — The Universal Deposit SDK
 - **[`/deposit-demo`](./deposit-demo)** — Next.js demo application
 
-## 🚀 Quick Overview
+## Quick Start
 
-The Deposit SDK leverages Universal Accounts to enable cross-chain deposits:
+### React (Modal)
 
-- **Multi-chain deposit addresses** — Universal Account provides addresses for 17 chains (EVM + Solana)
-- **Auto-sweep functionality** — Automatically sweeps deposited funds to user's connected wallet
-- **Pre-built React components** — Drop-in modal and widget UI
-- **Headless mode** — Full programmatic control for custom implementations
-- **Chain-specific token filtering** — Only shows supported assets per chain
+```tsx
+import { DepositProvider, useDeposit, DepositModal, CHAIN } from '@particle-network/universal-deposit/react';
 
-**How it works:** The SDK creates a Universal Account (via an intermediary JWT wallet) that provides deposit addresses across multiple chains. When users deposit funds to these addresses, the SDK detects the deposits and automatically sweeps them to the user's connected wallet on their preferred chain (default: Arbitrum).
+function App() {
+  return (
+    <DepositProvider config={{ destination: { chainId: CHAIN.ARBITRUM } }}>
+      <YourApp />
+    </DepositProvider>
+  );
+}
 
-## 📚 Documentation
+function DepositButton() {
+  const { address } = useYourWallet();
+  const { isReady } = useDeposit({ ownerAddress: address });
+  const [open, setOpen] = useState(false);
 
-For complete SDK documentation, API reference, and integration guides, see:
+  return (
+    <>
+      <button onClick={() => setOpen(true)} disabled={!isReady}>Deposit</button>
+      <DepositModal isOpen={open} onClose={() => setOpen(false)} theme="dark" />
+    </>
+  );
+}
+```
 
-**[→ SDK Documentation](./sdk/README.md)**
+### React (Inline)
 
-The SDK docs include:
-- Installation and setup
-- React integration (Provider, hooks, components)
-- Headless/programmatic usage
-- Configuration options
-- Event system
-- Error handling
-- Architecture details
+```tsx
+import { useDeposit, DepositWidget } from '@particle-network/universal-deposit/react';
 
-## 🎮 Running the Demo
+function Page() {
+  const { address } = useYourWallet();
+  const { isReady } = useDeposit({ ownerAddress: address });
+
+  if (!isReady) return <Loading />;
+  return <DepositWidget fullWidth theme="dark" />;
+}
+```
+
+### Headless
+
+```typescript
+import { DepositClient, CHAIN } from '@particle-network/universal-deposit';
+
+const client = new DepositClient({
+  ownerAddress: '0x...',
+  intermediaryAddress: '0x...',
+  authCoreProvider: { signMessage: (msg) => provider.signMessage(msg) },
+  destination: { chainId: CHAIN.ARBITRUM },
+});
+
+await client.initialize();
+client.startWatching();
+
+client.on('deposit:detected', (deposit) => {
+  console.log(`${deposit.token} on chain ${deposit.chainId}: $${deposit.amountUSD}`);
+});
+
+client.on('deposit:complete', (result) => {
+  console.log('Swept:', result.explorerUrl);
+});
+```
+
+## How It Works
+
+1. SDK creates a Universal Account (via an intermediary JWT wallet) that provides deposit addresses across multiple chains (EVM + Solana).
+2. When funds arrive, the SDK detects them via balance polling and automatically bridges them to the configured destination.
+3. Funds are consolidated on a single chain — no bridging required from the user.
+
+## Documentation
+
+- **[SDK Reference](./sdk/docs/SDK-REFERENCE.md)** — Complete API reference
+- **[Contributing Guide](./sdk/docs/CONTRIB.md)** — Development workflow
+- **[Runbook](./sdk/docs/RUNBOOK.md)** — Deployment & operations
+
+## Running the Demo
 
 ### Prerequisites
 
 - Node.js 18+ and npm
-- Privy account and API keys ([get them here](https://privy.io))
+- Privy account and API keys ([dashboard.privy.io](https://dashboard.privy.io))
 
 ### Setup
 
-1. **Navigate to the demo directory:**
+1. **Build the SDK first:**
+   ```bash
+   cd sdk && npm run build
+   ```
+
+2. **Configure environment:**
    ```bash
    cd deposit-demo
+   cp .env.sample .env
    ```
+   Fill in your `NEXT_PUBLIC_PRIVY_APP_ID`.
 
-2. **Install dependencies:**
+3. **Run:**
    ```bash
-   npm install
+   npm install && npm run dev
    ```
 
-3. **Configure environment variables:**
-   
-   Create a `.env.local` file in the `deposit-demo` directory:
-   ```bash
-   NEXT_PUBLIC_PRIVY_APP_ID=your_privy_app_id
-   ```
-
-4. **Run the development server:**
-   ```bash
-   npm run dev
-   ```
-
-5. **Open the demo:**
-   
-   Navigate to [http://localhost:3000](http://localhost:3000)
+4. **Open** [http://localhost:3000](http://localhost:3000)
 
 ### What the Demo Shows
 
-- Privy wallet authentication
-- Deposit SDK initialization with user's wallet
-- Deposit modal with token/chain selection
+- Privy authentication (email or social)
+- SDK auto-initialization (JWT fetch, Auth Core connection, Universal Account setup)
+- Modal and inline display modes
 - Real-time deposit detection and auto-sweep
-- Activity history display
+- Activity history
 
-## 🛠️ Development
-
-### Building the SDK
+## Development
 
 ```bash
+# SDK
 cd sdk
-npm install
-npm run build
-```
-
-### Running Tests
-
-```bash
-cd sdk
+npm run build             # Build ESM + CJS + types
+npm run dev               # Watch mode
+npm run typecheck         # Type checking
 npm run test              # Unit tests
-npm run test:integration  # Integration tests
+npm run test:integration  # Integration tests (real API)
 ```
 
-## 🌐 Supported Chains
+## Supported Chains
 
-The SDK supports **17 chains** with chain-specific token filtering:
-
-| Chain | Chain ID | Supported Assets |
-|-------|----------|------------------|
+| Chain | ID | Assets |
+|-------|----|--------|
 | Ethereum | 1 | USDC, USDT, ETH, BTC |
+| Optimism | 10 | USDC, USDT, ETH, BTC |
 | BNB Chain | 56 | USDC, USDT, ETH, BTC, BNB |
 | Polygon | 137 | USDC, USDT, ETH, BTC |
-| Arbitrum | 42161 | USDC, USDT, ETH, BTC |
-| Optimism | 10 | USDC, USDT, ETH, BTC |
 | Base | 8453 | USDC, ETH, BTC |
+| Arbitrum | 42161 | USDC, USDT, ETH, BTC |
 | Avalanche | 43114 | USDC, USDT, ETH, BTC |
 | Linea | 59144 | USDC, USDT, ETH, BTC |
-| Mantle | 5000 | USDT |
-| Monad | 143 | USDC |
-| Plasma | 9745 | USDT |
-| X Layer | 196 | USDC, USDT |
 | HyperEVM | 999 | USDT |
+| Mantle | 5000 | USDT |
+| Merlin | 4200 | — |
+| X Layer | 196 | USDC, USDT |
+| Monad | 143 | USDC |
 | Sonic | 146 | USDC |
+| Plasma | 9745 | USDT |
 | Berachain | 80094 | USDC |
-| Merlin | 4200 | BTC |
 | Solana | 101 | USDC, USDT, SOL |
 
-## 📄 License
+## License
 
-MIT
+Apache 2.0

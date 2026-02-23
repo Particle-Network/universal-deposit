@@ -78,4 +78,101 @@ export const TOKEN_DECIMALS: Record<string, number> = {
   BNB: 18,
 };
 
+/**
+ * Chain-specific token decimal overrides.
+ * Some chains use different decimal places for standard tokens.
+ * For example, BNB Chain uses 18 decimals for USDC/USDT instead of 6.
+ */
+export const CHAIN_TOKEN_DECIMALS: Record<number, Record<string, number>> = {
+  [CHAIN.BNB]: {
+    USDC: 18,
+    USDT: 18,
+  },
+};
+
+/**
+ * Get the number of decimals for a token on a specific chain.
+ * Checks chain-specific overrides first, then falls back to global defaults.
+ *
+ * @param token - Token symbol (e.g., 'USDC', 'ETH')
+ * @param chainId - Optional chain ID for chain-specific decimal lookup
+ * @returns Number of decimals for the token
+ *
+ * @example
+ * getTokenDecimals('USDC')        // 6 (default)
+ * getTokenDecimals('USDC', 56)    // 18 (BNB chain override)
+ * getTokenDecimals('ETH', 56)     // 18 (global default, no override)
+ */
+export function getTokenDecimals(token: string, chainId?: number): number {
+  const upperToken = token.toUpperCase();
+
+  // Check chain-specific override first
+  if (chainId !== undefined && CHAIN_TOKEN_DECIMALS[chainId]?.[upperToken] !== undefined) {
+    return CHAIN_TOKEN_DECIMALS[chainId][upperToken];
+  }
+
+  // Fall back to global defaults
+  return TOKEN_DECIMALS[upperToken] ?? 6;
+}
+
 export const DEFAULT_SUPPORTED_TOKENS = ['ETH', 'USDC', 'USDT', 'BTC', 'SOL', 'BNB'] as const;
+
+/**
+ * USD threshold below which a balance is considered "dust" — a residual
+ * leftover from a partial sweep (95% or 50% gas-fallback strategy).
+ *
+ * Dust is silently ignored: no events emitted, not shown in recovery.
+ * $0.10 is chosen because the smallest per-token minimum is USDC/USDT at
+ * $0.20, and a 50% sweep residual from a $0.20 deposit = $0.10.
+ */
+const DUST_THRESHOLD_USD = 0.10;
+
+/**
+ * Returns true if the USD value is above the dust threshold and should
+ * be treated as a real balance. Returns true for unknown/zero USD values
+ * (erring on the side of showing the balance rather than hiding it).
+ */
+export function isAboveDustThreshold(amountUSD: number): boolean {
+  if (amountUSD <= 0) return true;
+  return amountUSD > DUST_THRESHOLD_USD;
+}
+
+/**
+ * Per-token minimum deposit amounts in native units.
+ * These replace the USD-based threshold to avoid reliance on API price data.
+ */
+const MIN_DEPOSIT_AMOUNTS: Record<string, number> = {
+  USDC: 0.2,
+  USDT: 0.2,
+  ETH: 0.0004,
+  BNB: 0.0003,
+  SOL: 0.006,
+  BTC: 0.000005,
+};
+
+/**
+ * Get the minimum deposit amount for a token in native units.
+ *
+ * @param token - Token symbol (e.g., 'USDC', 'ETH')
+ * @returns Minimum amount in native units, or 0 if unknown
+ */
+export function getMinDepositAmount(token: string): number {
+  return MIN_DEPOSIT_AMOUNTS[token.toUpperCase()] ?? 0;
+}
+
+/**
+ * Check whether a raw on-chain amount meets the minimum deposit threshold.
+ *
+ * @param rawAmount - On-chain amount as bigint (smallest unit)
+ * @param token - Token symbol (e.g., 'USDC', 'ETH')
+ * @param chainId - Optional chain ID for chain-specific decimal lookup
+ * @returns true if the amount meets or exceeds the minimum
+ */
+export function meetsMinimumDeposit(rawAmount: bigint, token: string, chainId?: number): boolean {
+  const min = getMinDepositAmount(token);
+  if (min === 0) return rawAmount > 0n;
+
+  const decimals = getTokenDecimals(token, chainId);
+  const amount = Number(rawAmount) / 10 ** decimals;
+  return amount >= min;
+}

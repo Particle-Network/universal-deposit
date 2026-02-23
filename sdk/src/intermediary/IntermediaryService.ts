@@ -8,83 +8,119 @@
  */
 
 import { JwtError, AuthenticationError } from '../core/errors';
-import type { JwtResponse, IntermediarySession, AuthCoreProvider } from '../core/types';
+import type { JwtResponse, IntermediarySession } from '../core/types';
 import { DEFAULT_JWT_SERVICE_URL } from '../constants';
+import { JwtVerifier } from './JwtVerifier';
 
-export interface IntermediaryConfig {
+interface IntermediaryConfig {
   projectId: string;
   clientKey: string;
   appId: string;
   jwtServiceUrl: string;
 }
 
-export interface AuthCoreConnection {
-  address: string;
-  provider: AuthCoreProvider;
-}
-
 export class IntermediaryService {
   private config: IntermediaryConfig;
-  private session: IntermediarySession | null = null;
-  private sessionPromise: Promise<IntermediarySession> | null = null;
+  private verifier: JwtVerifier;
+
+  // Per-user session cache to prevent session mixing between different users
+  private sessions: Map<string, IntermediarySession> = new Map();
+  private sessionPromises: Map<string, Promise<IntermediarySession>> = new Map();
 
   constructor(config: IntermediaryConfig) {
     this.config = {
       ...config,
       jwtServiceUrl: config.jwtServiceUrl || DEFAULT_JWT_SERVICE_URL,
     };
+    this.verifier = new JwtVerifier(`${this.config.jwtServiceUrl}/.well-known/jwks.json`);
+  }
+
+  /**
+   * Normalize user ID to ensure consistent cache keys
+   */
+  private normalizeUserId(userId: string): string {
+    return userId.toLowerCase().trim();
   }
 
   /**
    * Get or create a session for the given user ID (owner address)
-   * Uses caching to avoid redundant JWT requests
+   * Uses per-user caching to avoid redundant JWT requests and prevent session mixing
    */
   async getSession(userId: string): Promise<IntermediarySession> {
-    // Return cached session if still valid
-    if (this.session && this.isSessionValid(this.session)) {
-      return this.session;
+    const normalizedUserId = this.normalizeUserId(userId);
+
+    // Return cached session if still valid for this specific user
+    const cachedSession = this.sessions.get(normalizedUserId);
+    if (cachedSession && this.isSessionValid(cachedSession)) {
+      return cachedSession;
     }
 
-    // If a request is already in flight, wait for it
-    if (this.sessionPromise) {
-      return this.sessionPromise;
+    // If a request is already in flight for this user, wait for it
+    const existingPromise = this.sessionPromises.get(normalizedUserId);
+    if (existingPromise) {
+      return existingPromise;
     }
 
-    // Create new session
-    this.sessionPromise = this.createSession(userId);
+    // Create new session for this user
+    const sessionPromise = this.createSession(normalizedUserId);
+    this.sessionPromises.set(normalizedUserId, sessionPromise);
 
     try {
-      this.session = await this.sessionPromise;
-      return this.session;
+      const session = await sessionPromise;
+      this.sessions.set(normalizedUserId, session);
+      return session;
     } finally {
-      this.sessionPromise = null;
+      this.sessionPromises.delete(normalizedUserId);
     }
   }
 
   /**
-   * Force refresh the session even if current one is valid
+   * Force refresh the session for a specific user even if current one is valid
    */
   async refreshSession(userId: string): Promise<IntermediarySession> {
-    this.session = null;
+    const normalizedUserId = this.normalizeUserId(userId);
+    this.sessions.delete(normalizedUserId);
+    this.sessionPromises.delete(normalizedUserId);
     return this.getSession(userId);
   }
 
   /**
-   * Get the current session without fetching a new one
+   * Get the current session for a specific user without fetching a new one
    */
-  getCurrentSession(): IntermediarySession | null {
-    if (this.session && this.isSessionValid(this.session)) {
-      return this.session;
+  getCurrentSession(userId?: string): IntermediarySession | null {
+    if (!userId) {
+      // Legacy behavior: return first valid session (for backward compatibility)
+      for (const session of this.sessions.values()) {
+        if (this.isSessionValid(session)) {
+          return session;
+        }
+      }
+      return null;
+    }
+
+    const normalizedUserId = this.normalizeUserId(userId);
+    const session = this.sessions.get(normalizedUserId);
+    if (session && this.isSessionValid(session)) {
+      return session;
     }
     return null;
   }
 
   /**
-   * Clear the current session
+   * Clear the session for a specific user
+   */
+  clearSessionForUser(userId: string): void {
+    const normalizedUserId = this.normalizeUserId(userId);
+    this.sessions.delete(normalizedUserId);
+    this.sessionPromises.delete(normalizedUserId);
+  }
+
+  /**
+   * Clear all sessions (all users)
    */
   clearSession(): void {
-    this.session = null;
-    this.sessionPromise = null;
+    this.sessions.clear();
+    this.sessionPromises.clear();
   }
 
   /**
@@ -164,6 +200,18 @@ export class IntermediaryService {
 
     if (!data.jwt) {
       throw new JwtError('JWT service did not return a valid token');
+    }
+
+    // Verify the token's signature and claims using the JWKS endpoint.
+    // This prevents accepting a tampered or forged JWT even if the worker
+    // is compromised or the request is intercepted.
+    try {
+      await this.verifier.verify(data.jwt);
+    } catch (err) {
+      throw new JwtError(
+        `JWT verification failed: ${err instanceof Error ? err.message : String(err)}`,
+        err,
+      );
     }
 
     return data;

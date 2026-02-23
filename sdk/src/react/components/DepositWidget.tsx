@@ -1,13 +1,27 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { X, Copy, QrCode, Check, Clock, AlertCircle } from "lucide-react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { X, Copy, QrCode, Check, Clock, AlertCircle, AlertTriangle, ArrowRight } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { cn } from "../utils/cn";
 import type { DepositClient } from "../../core/DepositClient";
-import type { DetectedDeposit, SweepResult, TokenType } from "../../core/types";
-import { CHAIN, CHAIN_META } from "../../constants/chains";
+import type {
+  DetectedDeposit,
+  SweepResult,
+  RecoveryResult,
+  TokenType,
+  DestinationConfig,
+} from "../../core/types";
+import { CHAIN_META, getChainName } from "../../constants/chains";
+import { getTokenDecimals, getMinDepositAmount } from "../../constants/tokens";
 import { useDepositContext } from "../context/DepositContext";
+import type { ActivityItem } from "../types";
+import {
+  LOGO_URLS,
+  CHAIN_OPTIONS,
+  CHAIN_SUPPORTED_TOKENS,
+  TOKEN_SUPPORTED_CHAINS,
+} from "../constants/widget-constants";
 
 export interface DepositWidgetProps {
   /**
@@ -17,189 +31,37 @@ export interface DepositWidgetProps {
   onClose?: () => void;
   className?: string;
   theme?: "dark" | "light";
+  /**
+   * Destination configuration for where swept funds are sent.
+   * If provided, this takes precedence over the provider's destination config.
+   * @see DestinationConfig
+   */
+  destination?: DestinationConfig;
+  /**
+   * Callback when destination is changed (via edit UI or programmatically).
+   */
+  onDestinationChange?: (destination: DestinationConfig) => void;
+  /**
+   * Whether to show the destination section in the widget.
+   * @default true
+   */
+  showDestination?: boolean;
+  /**
+   * Whether the widget should expand to fill its container width.
+   * When false (default), widget has a fixed width of 380px.
+   * Use true for inline/embedded layouts.
+   * @default false
+   */
+  fullWidth?: boolean;
+  /**
+   * Whether to show the header section with title and close button.
+   * Use false for minimal embedded layouts where header is not needed.
+   * @default true
+   */
+  showHeader?: boolean;
 }
 
-interface ActivityItem {
-  id: string;
-  type: "detected" | "processing" | "complete" | "error";
-  token: string;
-  chainId: number;
-  amount: string;
-  timestamp: number;
-  message?: string;
-}
-
-const LOGO_URLS: Record<string, string> = {
-  // Chains
-  [CHAIN.ETHEREUM]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png",
-  [CHAIN.ARBITRUM]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/arbitrum/info/logo.png",
-  [CHAIN.BASE]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/base/info/logo.png",
-  [CHAIN.POLYGON]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/polygon/info/logo.png",
-  [CHAIN.BNB]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/binance/info/logo.png",
-  [CHAIN.SOLANA]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/solana/info/logo.png",
-  [CHAIN.OPTIMISM]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/optimism/info/logo.png",
-  [CHAIN.AVALANCHE]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/avalanchec/info/logo.png",
-  [CHAIN.LINEA]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/linea/info/logo.png",
-  [CHAIN.MANTLE]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/mantle/info/logo.png",
-  [CHAIN.HYPERVM]:
-    "https://universalx.app/_next/image?url=https%3A%2F%2Fstatic.particle.network%2Fchains%2Fevm%2Ficons%2F999.png&w=32&q=75",
-  [CHAIN.MERLIN]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/merlin/info/logo.png",
-  [CHAIN.XLAYER]:
-    "https://universalx.app/_next/image?url=https%3A%2F%2Fstatic.particle.network%2Fchains%2Fevm%2Ficons%2F196.png&w=32&q=75",
-  [CHAIN.MONAD]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/monad/info/logo.png",
-  [CHAIN.SONIC]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/sonic/info/logo.png",
-  [CHAIN.PLASMA]:
-    "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/plasma/info/logo.png",
-  [CHAIN.BERACHAIN]:
-    "https://universalx.app/_next/image?url=https%3A%2F%2Fstatic.particle.network%2Fchains%2Fevm%2Ficons%2F80094.png&w=32&q=75",
-  // Tokens
-  ETH: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png",
-  USDC: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png",
-  USDT: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png",
-  BTC: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/bitcoin/info/logo.png",
-  SOL: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/solana/info/logo.png",
-  BNB: "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/binance/info/logo.png",
-};
-
-const CHAIN_OPTIONS = [
-  {
-    id: CHAIN.ETHEREUM,
-    name: "Ethereum",
-    color: "#627eea",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.BNB,
-    name: "BNB Chain",
-    color: "#f3ba2f",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.MANTLE,
-    name: "Mantle",
-    color: "#000000",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.MONAD,
-    name: "Monad",
-    color: "#6366f1",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.PLASMA,
-    name: "Plasma",
-    color: "#8b5cf6",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.XLAYER,
-    name: "X Layer",
-    color: "#000000",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.BASE,
-    name: "Base",
-    color: "#0052ff",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.ARBITRUM,
-    name: "Arbitrum",
-    color: "#12aaeb",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.AVALANCHE,
-    name: "Avalanche",
-    color: "#e84142",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.OPTIMISM,
-    name: "OP (Optimism)",
-    color: "#ff0420",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.POLYGON,
-    name: "Polygon",
-    color: "#8247e5",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.HYPERVM,
-    name: "HyperEVM",
-    color: "#00d4ff",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.BERACHAIN,
-    name: "Berachain",
-    color: "#f5841f",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.LINEA,
-    name: "Linea",
-    color: "#121212",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.SONIC,
-    name: "Sonic",
-    color: "#1969ff",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.MERLIN,
-    name: "Merlin",
-    color: "#f7931a",
-    addressType: "evm" as const,
-  },
-  {
-    id: CHAIN.SOLANA,
-    name: "Solana",
-    color: "#9945ff",
-    addressType: "solana" as const,
-  },
-];
-
-const CHAIN_SUPPORTED_TOKENS: Record<number, TokenType[]> = {
-  [CHAIN.SOLANA]: ["USDC", "USDT", "SOL"],
-  [CHAIN.ETHEREUM]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.BASE]: ["USDC", "ETH", "BTC"],
-  [CHAIN.BNB]: ["USDC", "USDT", "ETH", "BTC", "BNB"],
-  [CHAIN.MANTLE]: ["USDT"],
-  [CHAIN.MONAD]: ["USDC"],
-  [CHAIN.PLASMA]: ["USDT"],
-  [CHAIN.XLAYER]: ["USDC", "USDT"],
-  [CHAIN.HYPERVM]: ["USDT"],
-  [CHAIN.SONIC]: ["USDC"],
-  [CHAIN.BERACHAIN]: ["USDC"],
-  [CHAIN.AVALANCHE]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.ARBITRUM]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.OPTIMISM]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.LINEA]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.POLYGON]: ["USDC", "USDT", "ETH", "BTC"],
-  [CHAIN.MERLIN]: ["BTC"],
-};
-
-function useOptionalDepositContext(): { client: DepositClient | null } | null {
+function useOptionalDepositContext() {
   try {
     return useDepositContext();
   } catch {
@@ -212,29 +74,63 @@ export function DepositWidget({
   onClose,
   className,
   theme = "dark",
+  destination: destinationProp,
+  onDestinationChange,
+  showDestination = true,
+  fullWidth = false,
+  showHeader = true,
 }: DepositWidgetProps) {
   // Try to get client from context if not provided as prop
   const context = useOptionalDepositContext();
   const client = clientProp || context?.client || null;
+  const hasContext = context !== null;
+  const logger = context?.logger ?? { log: () => {}, warn: () => {}, error: () => {} };
+
+  // Activity: use context state when available, fallback to local for direct client prop
+  const [localActivity, setLocalActivity] = useState<ActivityItem[]>([]);
+  const activity = hasContext ? (context.recentActivity ?? []) : localActivity;
+  const recoveringIdsRef = useRef<Set<string>>(new Set());
+
+  // Track current destination
+  const [currentDestination, setCurrentDestination] = useState<{
+    address: string;
+    chainId: number;
+  } | null>(null);
 
   const [selectedChain, setSelectedChain] = useState(CHAIN_OPTIONS[0]);
   const [selectedToken, setSelectedToken] = useState<TokenType>(
-    CHAIN_SUPPORTED_TOKENS[CHAIN_OPTIONS[0].id][0]
+    CHAIN_SUPPORTED_TOKENS[CHAIN_OPTIONS[0].id][0],
   );
   const [showTokenDropdown, setShowTokenDropdown] = useState(false);
   const [showChainDropdown, setShowChainDropdown] = useState(false);
 
   const availableTokens = CHAIN_SUPPORTED_TOKENS[selectedChain.id] || [];
 
+  const availableChains = useMemo(() => {
+    const supportedChainIds = TOKEN_SUPPORTED_CHAINS[selectedToken] || [];
+    return CHAIN_OPTIONS.filter((chain) => supportedChainIds.includes(chain.id));
+  }, [selectedToken]);
+
   useEffect(() => {
     if (!availableTokens.includes(selectedToken)) {
       setSelectedToken(availableTokens[0]);
     }
   }, [selectedChain, selectedToken, availableTokens]);
+
+  useEffect(() => {
+    const supportedChainIds = TOKEN_SUPPORTED_CHAINS[selectedToken] || [];
+    if (!supportedChainIds.includes(selectedChain.id)) {
+      const firstAvailable = CHAIN_OPTIONS.find((c) => supportedChainIds.includes(c.id));
+      if (firstAvailable) {
+        setSelectedChain(firstAvailable);
+      }
+    }
+  }, [selectedToken, selectedChain.id]);
   const [showQR, setShowQR] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [depositAddress, setDepositAddress] = useState<string>("");
+  const autoSweep = client?.getConfig().autoSweep ?? true;
+  const minValueUSD = client?.getConfig().minValueUSD;
 
   // Get deposit address based on selected chain
   useEffect(() => {
@@ -249,72 +145,317 @@ export function DepositWidget({
             : addresses.evm;
         setDepositAddress(addr);
       } catch (error) {
-        console.error("Failed to get deposit address:", error);
+        logger.error("Failed to get deposit address:", error);
       }
     };
     getAddress();
   }, [client, selectedChain]);
 
-  // Listen for deposit events
+  // Use ref for callback to prevent infinite loops when consumer doesn't memoize
+  const onDestinationChangeRef = useRef(onDestinationChange);
+  onDestinationChangeRef.current = onDestinationChange;
+
+  // Sync destination prop to client and track current destination
   useEffect(() => {
-    if (!client) return;
+    if (!client) {
+      setCurrentDestination(null);
+      return;
+    }
+
+    // If destination prop provided, apply it to the client
+    if (destinationProp) {
+      try {
+        client.setDestination(destinationProp);
+      } catch (e) {
+        logger.warn('[DepositWidget] setDestination failed:', e);
+      }
+    }
+
+    // Get current destination from client
+    try {
+      const dest = client.getDestination();
+      setCurrentDestination(dest);
+      // Notify consumer of current destination
+      onDestinationChangeRef.current?.(dest);
+    } catch {
+      // Client may not be fully initialized
+      setCurrentDestination(null);
+    }
+  }, [client, destinationProp]);
+
+  const handleRecover = useCallback(
+    async (item: ActivityItem) => {
+      if (hasContext) {
+        return context.recoverActivityItem(item.id);
+      }
+      // Fallback for direct client prop mode
+      if (!client || recoveringIdsRef.current.has(item.id)) return;
+
+      recoveringIdsRef.current.add(item.id);
+      setLocalActivity((prev) =>
+        prev.map((a) =>
+          a.id === item.id ? { ...a, type: "processing" as const } : a,
+        ),
+      );
+
+      try {
+        const deposit: DetectedDeposit = {
+          id: item.id,
+          token: item.token as DetectedDeposit["token"],
+          chainId: item.chainId,
+          amount: item.amount,
+          amountUSD: item.amountUSD,
+          rawAmount: BigInt(item.amount),
+          detectedAt: item.timestamp,
+        };
+        const result = await client.recoverSingleDeposit(deposit);
+        if (result.status === "success") {
+          setLocalActivity((prev) =>
+            prev.map((a) =>
+              a.id === item.id
+                ? { ...a, type: "complete" as const, message: "Recovered successfully" }
+                : a,
+            ),
+          );
+        } else {
+          setLocalActivity((prev) =>
+            prev.map((a) =>
+              a.id === item.id
+                ? { ...a, type: "error" as const, message: result.error || "Recovery failed" }
+                : a,
+            ),
+          );
+        }
+      } catch (error) {
+        setLocalActivity((prev) =>
+          prev.map((a) =>
+            a.id === item.id
+              ? {
+                  ...a,
+                  type: "error" as const,
+                  message: error instanceof Error ? error.message : "Recovery failed",
+                }
+              : a,
+          ),
+        );
+      } finally {
+        recoveringIdsRef.current.delete(item.id);
+      }
+    },
+    [client, hasContext, context],
+  );
+
+  const handleBridge = useCallback(
+    async (item: ActivityItem) => {
+      if (hasContext) {
+        return context.bridgeActivityItem(item.id);
+      }
+      // Fallback for direct client prop mode
+      if (!client || recoveringIdsRef.current.has(item.id)) return;
+
+      recoveringIdsRef.current.add(item.id);
+      setLocalActivity((prev) =>
+        prev.map((a) =>
+          a.id === item.id ? { ...a, type: "processing" as const } : a,
+        ),
+      );
+
+      try {
+        const results = await client.sweep(item.id);
+        const result = results[0];
+        if (result?.status === "success") {
+          setLocalActivity((prev) =>
+            prev.map((a) =>
+              a.id === item.id
+                ? { ...a, type: "complete" as const, message: "Bridged successfully" }
+                : a,
+            ),
+          );
+        } else {
+          setLocalActivity((prev) =>
+            prev.map((a) =>
+              a.id === item.id
+                ? { ...a, type: "error" as const, message: result?.error || "Bridge failed" }
+                : a,
+            ),
+          );
+        }
+      } catch (error) {
+        setLocalActivity((prev) =>
+          prev.map((a) =>
+            a.id === item.id
+              ? {
+                  ...a,
+                  type: "error" as const,
+                  message: error instanceof Error ? error.message : "Bridge failed",
+                }
+              : a,
+          ),
+        );
+      } finally {
+        recoveringIdsRef.current.delete(item.id);
+      }
+    },
+    [client, hasContext, context],
+  );
+
+  // Listen for deposit events (only when using direct client prop without context)
+  useEffect(() => {
+    if (!client || hasContext) return;
 
     const handleDetected = (deposit: DetectedDeposit) => {
-      setActivity((prev) => [
-        {
+      setLocalActivity((prev) => {
+        const newItem = {
           id: deposit.id,
-          type: "detected",
+          type: "detected" as const,
           token: deposit.token,
           chainId: deposit.chainId,
           amount: deposit.amount,
+          amountUSD: deposit.amountUSD,
           timestamp: Date.now(),
-        },
-        ...prev,
-      ]);
+          deposit,
+        };
+
+        // Skip if there's already an in-flight or recently completed item
+        // for the same token+chain — prevents stale re-detection duplicates
+        const hasActiveItem = prev.some(
+          (item) =>
+            item.token === deposit.token &&
+            item.chainId === deposit.chainId &&
+            (item.type === "processing" ||
+              (item.type === "complete" &&
+                Date.now() - item.timestamp < 5 * 60 * 1000)),
+        );
+        if (hasActiveItem) return prev;
+
+        // Replace existing "detected" or "error" items for same token+chain
+        const existingIdx = prev.findIndex(
+          (item) =>
+            item.token === deposit.token &&
+            item.chainId === deposit.chainId &&
+            (item.type === "detected" || item.type === "error"),
+        );
+
+        if (existingIdx !== -1) {
+          return prev.map((item, i) => (i === existingIdx ? newItem : item));
+        }
+
+        return [newItem, ...prev].slice(0, 50);
+      });
+    };
+
+    const handleBelowThreshold = (deposit: DetectedDeposit) => {
+      setLocalActivity((prev) => {
+        const exists = prev.some(
+          (item) =>
+            item.type === "below_threshold" &&
+            item.token === deposit.token &&
+            item.chainId === deposit.chainId,
+        );
+        if (exists) return prev;
+        return [
+          {
+            id: deposit.id,
+            type: "below_threshold" as const,
+            token: deposit.token,
+            chainId: deposit.chainId,
+            amount: deposit.amount,
+            amountUSD: deposit.amountUSD,
+            timestamp: Date.now(),
+            message: "Too small to auto-bridge",
+            deposit,
+          },
+          ...prev,
+        ];
+      });
     };
 
     const handleProcessing = (deposit: DetectedDeposit) => {
-      setActivity((prev) =>
+      setLocalActivity((prev) =>
         prev.map((item) =>
-          item.id === deposit.id ? { ...item, type: "processing" } : item
-        )
+          item.id === deposit.id ? { ...item, type: "processing" as const } : item,
+        ),
       );
     };
 
     const handleComplete = (result: SweepResult) => {
-      setActivity((prev) =>
-        prev.map((item) =>
+      setLocalActivity((prev) => {
+        const updated = prev.map((item) =>
           item.id === result.depositId
-            ? { ...item, type: "complete", message: "Swept successfully" }
-            : item
-        )
-      );
+            ? { ...item, type: "complete" as const, result, message: "Bridged successfully" }
+            : item,
+        );
+        // Remove stale error items for the same token+chain (only older ones)
+        const completedItem = updated.find((item) => item.id === result.depositId);
+        if (completedItem) {
+          return updated.filter(
+            (item) =>
+              item.id === result.depositId ||
+              !(item.token === completedItem.token &&
+                item.chainId === completedItem.chainId &&
+                item.type === "error" &&
+                item.timestamp <= completedItem.timestamp),
+          );
+        }
+        return updated;
+      });
     };
 
     const handleError = (error: Error, deposit?: DetectedDeposit) => {
       if (deposit) {
-        setActivity((prev) =>
+        setLocalActivity((prev) =>
           prev.map((item) =>
             item.id === deposit.id
-              ? { ...item, type: "error", message: error.message }
-              : item
-          )
+              ? { ...item, type: "error" as const, message: error.message }
+              : item,
+          ),
         );
       }
     };
 
+    const handleRecoveryComplete = (results: RecoveryResult[]) => {
+      const consumedIndices = new Set<number>();
+      setLocalActivity((prev) =>
+        prev.map((item) => {
+          if (item.type !== "error" && item.type !== "below_threshold")
+            return item;
+
+          const idx = results.findIndex(
+            (r, i) =>
+              !consumedIndices.has(i) &&
+              r.status === "success" &&
+              r.token === item.token &&
+              r.chainId === item.chainId,
+          );
+          if (idx !== -1) {
+            consumedIndices.add(idx);
+            return {
+              ...item,
+              type: "complete" as const,
+              message: "Recovered successfully",
+            };
+          }
+          return item;
+        }),
+      );
+    };
+
     client.on("deposit:detected", handleDetected);
+    client.on("deposit:below_threshold", handleBelowThreshold);
     client.on("deposit:processing", handleProcessing);
     client.on("deposit:complete", handleComplete);
     client.on("deposit:error", handleError);
+    client.on("recovery:complete", handleRecoveryComplete);
 
     return () => {
       client.off("deposit:detected", handleDetected);
+      client.off("deposit:below_threshold", handleBelowThreshold);
       client.off("deposit:processing", handleProcessing);
       client.off("deposit:complete", handleComplete);
       client.off("deposit:error", handleError);
+      client.off("recovery:complete", handleRecoveryComplete);
     };
-  }, [client]);
+  }, [client, hasContext]);
 
   const copyAddress = useCallback(async () => {
     if (!depositAddress) return;
@@ -328,12 +469,8 @@ export function DepositWidget({
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   };
 
-  const formatAmount = (amount: string, token: string) => {
-    const decimals = ["ETH", "BNB"].includes(token)
-      ? 18
-      : token === "SOL"
-      ? 9
-      : 6;
+  const formatAmount = (amount: string, token: string, chainId: number) => {
+    const decimals = getTokenDecimals(token, chainId);
     const value = Number(amount) / Math.pow(10, decimals);
     return value.toFixed(value < 1 ? 4 : 2);
   };
@@ -367,11 +504,12 @@ export function DepositWidget({
       `}</style>
       <div
         className={cn(
-          "w-[380px] rounded-[20px] border overflow-hidden shadow-2xl",
+          "rounded-[20px] border overflow-hidden shadow-2xl",
+          fullWidth ? "w-full" : "w-[380px]",
           theme === "dark"
             ? "bg-[#09090b] border-[#27272a] text-white"
             : "bg-white border-gray-200 text-gray-900",
-          className
+          className,
         )}
         onClick={() => {
           setShowTokenDropdown(false);
@@ -379,31 +517,33 @@ export function DepositWidget({
         }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 pt-5 pb-4">
-          <h2 className="text-[15px] font-semibold">Deposit Assets</h2>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className={cn(
-                "p-1 rounded transition-colors",
-                theme === "dark"
-                  ? "text-[#52525b] hover:text-white"
-                  : "text-gray-500 hover:text-gray-900"
-              )}
-            >
-              <X size={20} />
-            </button>
-          )}
-        </div>
+        {showHeader && (
+          <div className="flex items-center justify-between px-6 pt-5 pb-4">
+            <h2 className="text-[15px] font-semibold">Deposit Assets</h2>
+            {onClose && (
+              <button
+                onClick={onClose}
+                className={cn(
+                  "p-1 rounded transition-colors",
+                  theme === "dark"
+                    ? "text-[#52525b] hover:text-white"
+                    : "text-gray-500 hover:text-gray-900",
+                )}
+              >
+                <X size={20} />
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Token/Chain Selector */}
-        <div className="px-6 mb-4">
+        <div className={cn("px-6 mb-4", !showHeader && "pt-5")}>
           <div
             className={cn(
               "flex h-11 rounded-xl border relative",
               theme === "dark"
                 ? "bg-[#18181b] border-[#27272a]"
-                : "bg-white border-gray-300"
+                : "bg-white border-gray-300",
             )}
           >
             {/* Token Selector */}
@@ -415,7 +555,7 @@ export function DepositWidget({
               }}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2.5 text-[13px] font-medium rounded-l-xl transition-colors",
-                theme === "dark" ? "hover:bg-[#27272a]" : "hover:bg-gray-100"
+                theme === "dark" ? "hover:bg-[#27272a]" : "hover:bg-gray-100",
               )}
             >
               <img
@@ -439,7 +579,7 @@ export function DepositWidget({
             <div
               className={cn(
                 "w-px h-5 self-center",
-                theme === "dark" ? "bg-[#27272a]" : "bg-gray-200"
+                theme === "dark" ? "bg-[#27272a]" : "bg-gray-200",
               )}
             />
 
@@ -452,7 +592,7 @@ export function DepositWidget({
               }}
               className={cn(
                 "flex-1 flex items-center justify-center gap-2.5 text-[13px] font-medium rounded-r-xl transition-colors",
-                theme === "dark" ? "hover:bg-[#27272a]" : "hover:bg-gray-100"
+                theme === "dark" ? "hover:bg-[#27272a]" : "hover:bg-gray-100",
               )}
             >
               <img
@@ -479,7 +619,7 @@ export function DepositWidget({
                   "custom-scrollbar absolute top-full left-0 w-[52%] mt-1.5 p-1 rounded-xl border shadow-lg z-50 max-h-[240px] overflow-y-auto",
                   theme === "dark"
                     ? "bg-[#09090b] border-[#3f3f46]"
-                    : "bg-white border-gray-300"
+                    : "bg-white border-gray-300",
                 )}
                 style={{
                   scrollbarWidth: "thin",
@@ -505,7 +645,7 @@ export function DepositWidget({
                       selectedToken === token &&
                         (theme === "dark"
                           ? "bg-[#27272a] text-white"
-                          : "bg-gray-100 text-gray-900")
+                          : "bg-gray-100 text-gray-900"),
                     )}
                   >
                     <img
@@ -526,7 +666,7 @@ export function DepositWidget({
                   "custom-scrollbar absolute top-full right-0 w-[52%] mt-1.5 p-1 rounded-xl border shadow-lg z-50 max-h-[280px] overflow-y-auto",
                   theme === "dark"
                     ? "bg-[#09090b] border-[#3f3f46]"
-                    : "bg-white border-gray-300"
+                    : "bg-white border-gray-300",
                 )}
                 style={{
                   scrollbarWidth: "thin",
@@ -537,7 +677,7 @@ export function DepositWidget({
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {CHAIN_OPTIONS.map((chain) => (
+                {availableChains.map((chain) => (
                   <button
                     key={chain.id}
                     onClick={() => {
@@ -552,7 +692,7 @@ export function DepositWidget({
                       selectedChain.id === chain.id &&
                         (theme === "dark"
                           ? "bg-[#27272a] text-white"
-                          : "bg-gray-100 text-gray-900")
+                          : "bg-gray-100 text-gray-900"),
                     )}
                   >
                     <img
@@ -575,7 +715,7 @@ export function DepositWidget({
               "rounded-xl border p-1 relative",
               theme === "dark"
                 ? "bg-[#121212] border-[#27272a]"
-                : "bg-gray-50 border-gray-300"
+                : "bg-gray-50 border-gray-300",
             )}
           >
             {/* Address Row */}
@@ -584,7 +724,7 @@ export function DepositWidget({
                 <span
                   className={cn(
                     "text-[11px] font-medium uppercase tracking-wide",
-                    theme === "dark" ? "text-[#a1a1aa]" : "text-gray-600"
+                    theme === "dark" ? "text-[#a1a1aa]" : "text-gray-600",
                   )}
                 >
                   Deposit Address
@@ -601,7 +741,7 @@ export function DepositWidget({
                     theme === "dark"
                       ? "border-transparent hover:border-[#27272a] hover:bg-[#27272a] text-[#a1a1aa] hover:text-white"
                       : "border-transparent hover:border-gray-200 hover:bg-gray-100 text-gray-500 hover:text-gray-900",
-                    copied && "text-green-500"
+                    copied && "text-green-500",
                   )}
                   title="Copy address"
                 >
@@ -613,7 +753,7 @@ export function DepositWidget({
                     "w-8 h-8 flex items-center justify-center rounded-md border transition-all",
                     theme === "dark"
                       ? "border-transparent hover:border-[#27272a] hover:bg-[#27272a] text-[#a1a1aa] hover:text-white"
-                      : "border-transparent hover:border-gray-200 hover:bg-gray-100 text-gray-500 hover:text-gray-900"
+                      : "border-transparent hover:border-gray-200 hover:bg-gray-100 text-gray-500 hover:text-gray-900",
                   )}
                   title="Show QR code"
                 >
@@ -641,29 +781,104 @@ export function DepositWidget({
                 "mt-1 rounded-lg p-2.5 flex gap-2.5 items-start",
                 theme === "dark"
                   ? "bg-amber-500/10 border border-amber-500/15"
-                  : "bg-amber-50 border border-amber-200"
+                  : "bg-amber-50 border border-amber-200",
               )}
             >
               <AlertCircle
                 size={14}
                 className={cn(
                   "shrink-0 mt-0.5",
-                  theme === "dark" ? "text-amber-400" : "text-amber-600"
+                  theme === "dark" ? "text-amber-400" : "text-amber-600",
                 )}
               />
-              <span
+              <div
                 className={cn(
                   "text-[11px] leading-relaxed",
-                  theme === "dark" ? "text-amber-400/90" : "text-amber-700"
+                  theme === "dark" ? "text-amber-400/90" : "text-amber-700",
                 )}
               >
-                Only deposit <strong>{selectedToken}</strong> on{" "}
-                <strong>{selectedChain.name}</strong>. Sending other assets may
-                result in permanent loss.
-              </span>
+                <p>
+                  Only deposit <strong>{selectedToken}</strong> on{" "}
+                  <strong>{selectedChain.name}</strong>. Sending other assets may
+                  result in permanent loss.
+                </p>
+                <p className="mt-1">
+                  Minimum deposit: <strong>{minValueUSD != null ? `$${minValueUSD}` : `${getMinDepositAmount(selectedToken)} ${selectedToken}`}</strong>
+                </p>
+              </div>
             </div>
           </div>
         </div>
+
+        {/* Destination Section */}
+        {showDestination && currentDestination && (
+          <div className="mx-6 mb-4">
+            <div
+              className={cn(
+                "rounded-xl border p-3 flex items-center justify-between",
+                theme === "dark"
+                  ? "bg-[#18181b] border-[#27272a]"
+                  : "bg-gray-50 border-gray-200",
+              )}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className={cn(
+                    "w-8 h-8 rounded-full flex items-center justify-center",
+                    theme === "dark" ? "bg-[#27272a]" : "bg-gray-200",
+                  )}
+                >
+                  {LOGO_URLS[currentDestination.chainId] ? (
+                    <img
+                      src={LOGO_URLS[currentDestination.chainId]}
+                      alt={getChainName(currentDestination.chainId)}
+                      className="w-5 h-5 rounded-full"
+                    />
+                  ) : (
+                    <div
+                      className={cn(
+                        "w-5 h-5 rounded-full",
+                        theme === "dark" ? "bg-[#3f3f46]" : "bg-gray-300",
+                      )}
+                    />
+                  )}
+                </div>
+                <div>
+                  <span
+                    className={cn(
+                      "text-[10px] font-medium uppercase tracking-wide block",
+                      theme === "dark" ? "text-[#71717a]" : "text-gray-500",
+                    )}
+                  >
+                    You will receive
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <img
+                      src={LOGO_URLS["USDC"]}
+                      alt="USDC"
+                      className="w-[14px] h-[14px] rounded-full"
+                    />
+                    <span className="text-[13px] font-medium">
+                      USDC on{" "}
+                      {getChainName(currentDestination.chainId) ||
+                        `Chain ${currentDestination.chainId}`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="text-right">
+                <span
+                  className={cn(
+                    "font-mono text-[12px]",
+                    theme === "dark" ? "text-[#a1a1aa]" : "text-gray-600",
+                  )}
+                >
+                  {formatAddress(currentDestination.address)}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Activity Section */}
         <div
@@ -671,13 +886,13 @@ export function DepositWidget({
             "border-t",
             theme === "dark"
               ? "bg-[#121212] border-[#27272a]"
-              : "bg-gray-50 border-gray-200"
+              : "bg-gray-50 border-gray-200",
           )}
         >
           <div
             className={cn(
               "px-6 pt-4 pb-2 text-[11px] font-semibold uppercase tracking-wide",
-              theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500"
+              theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500",
             )}
           >
             Recent Activity
@@ -687,7 +902,7 @@ export function DepositWidget({
               <div
                 className={cn(
                   "px-6 py-8 text-center text-[13px]",
-                  theme === "dark" ? "text-[#52525b]" : "text-gray-400"
+                  theme === "dark" ? "text-[#52525b]" : "text-gray-400",
                 )}
               >
                 No deposits yet
@@ -700,7 +915,7 @@ export function DepositWidget({
                     "px-6 py-3 flex items-center justify-between border-b last:border-b-0 transition-colors",
                     theme === "dark"
                       ? "border-[#27272a] hover:bg-[#18181b]"
-                      : "border-gray-200 hover:bg-gray-100"
+                      : "border-gray-200 hover:bg-gray-100",
                   )}
                 >
                   <div className="flex items-center gap-3">
@@ -716,7 +931,9 @@ export function DepositWidget({
                         item.type === "detected" &&
                           "bg-blue-500/10 border-blue-500/20 text-blue-500",
                         item.type === "error" &&
-                          "bg-red-500/10 border-red-500/20 text-red-500"
+                          "bg-red-500/10 border-red-500/20 text-red-500",
+                        item.type === "below_threshold" &&
+                          "bg-amber-500/10 border-amber-500/20 text-amber-500",
                       )}
                     >
                       {item.type === "complete" && <Check size={14} />}
@@ -725,6 +942,9 @@ export function DepositWidget({
                       )}
                       {item.type === "detected" && <Check size={14} />}
                       {item.type === "error" && <X size={14} />}
+                      {item.type === "below_threshold" && (
+                        <AlertTriangle size={14} />
+                      )}
                     </div>
                     <div>
                       <h4
@@ -733,35 +953,70 @@ export function DepositWidget({
                           item.type === "processing" &&
                             (theme === "dark"
                               ? "text-[#a1a1aa]"
-                              : "text-gray-500")
+                              : "text-gray-500"),
+                          item.type === "below_threshold" &&
+                            (theme === "dark"
+                              ? "text-amber-400"
+                              : "text-amber-600"),
                         )}
                       >
                         {item.type === "complete" && `Received ${item.token}`}
                         {item.type === "processing" && "Processing..."}
                         {item.type === "detected" && `Detected ${item.token}`}
                         {item.type === "error" && "Failed"}
+                        {item.type === "below_threshold" &&
+                          `Below minimum`}
                       </h4>
                       <p
                         className={cn(
                           "text-[11px]",
-                          theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500"
+                          theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500",
                         )}
                       >
-                        {CHAIN_META[item.chainId]?.name ||
-                          `Chain ${item.chainId}`}{" "}
-                        • {formatTime(item.timestamp)}
+                        {item.type === "below_threshold"
+                          ? `${item.token} on ${CHAIN_META[item.chainId]?.name || `Chain ${item.chainId}`} • Too small to auto-bridge`
+                          : `${CHAIN_META[item.chainId]?.name || `Chain ${item.chainId}`} • ${formatTime(item.timestamp)}`}
                       </p>
                     </div>
                   </div>
-                  <span
-                    className={cn(
-                      "font-mono text-[13px] font-medium",
-                      item.type === "processing" &&
-                        (theme === "dark" ? "text-[#a1a1aa]" : "text-gray-500")
-                    )}
-                  >
-                    +{formatAmount(item.amount, item.token)}
-                  </span>
+                  {item.type === "below_threshold" ? (
+                    <button
+                      onClick={() => handleRecover(item)}
+                      className={cn(
+                        "text-[12px] font-medium px-3 py-1 rounded-lg transition-colors",
+                        theme === "dark"
+                          ? "bg-amber-500/15 text-amber-400 hover:bg-amber-500/25"
+                          : "bg-amber-100 text-amber-700 hover:bg-amber-200",
+                      )}
+                    >
+                      Recover
+                    </button>
+                  ) : item.type === "detected" && !autoSweep ? (
+                    <button
+                      onClick={() => handleBridge(item)}
+                      className={cn(
+                        "flex items-center gap-1.5 text-[12px] font-medium px-3 py-1 rounded-lg transition-colors",
+                        theme === "dark"
+                          ? "bg-blue-500/15 text-blue-400 hover:bg-blue-500/25"
+                          : "bg-blue-100 text-blue-700 hover:bg-blue-200",
+                      )}
+                    >
+                      Bridge
+                      <ArrowRight size={12} />
+                    </button>
+                  ) : (
+                    <span
+                      className={cn(
+                        "font-mono text-[13px] font-medium",
+                        item.type === "processing" &&
+                          (theme === "dark"
+                            ? "text-[#a1a1aa]"
+                            : "text-gray-500"),
+                      )}
+                    >
+                      +{formatAmount(item.amount, item.token, item.chainId)}
+                    </span>
+                  )}
                 </div>
               ))
             )}
