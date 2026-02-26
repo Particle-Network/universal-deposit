@@ -76,7 +76,7 @@ function Page() {
   const { address } = useYourWallet();
   const {
     isReady, depositAddresses, pendingDeposits,
-    recentActivity, status, sweep, currentDestination,
+    recentActivity, status, sweep, currentDestination, client,
   } = useDeposit({ ownerAddress: address });
 
   if (!isReady) return <Loading />;
@@ -286,6 +286,9 @@ const client = new DepositClient({
 | `refundAll(reason?)` | `RefundReason?` | `Promise<RefundResult[]>` | Refund all pending |
 | `canRefund(id)` | `string` | `Promise<{ eligible, reason? }>` | Check refund eligibility |
 | `getRefundConfig()` | — | `RefundConfig` | Current refund config |
+| `getTransactions(page?, pageSize?)` | `number?, number?` | `Promise<TransactionsResponse>` | Paginated transaction history |
+| `getTokenTransactions(filter, pageToken?)` | `TokenTransactionFilter, string?` | `Promise<TokenTransactionsResponse>` | Token-filtered transactions (cursor-based) |
+| `getTransaction(transactionId)` | `string` | `Promise<UATransaction>` | Get single transaction by ID |
 
 ### Events
 
@@ -392,6 +395,8 @@ type RefundReason = 'sweep_failed' | 'user_requested' | 'address_type_mismatch' 
 interface DepositAddresses { evm: string; solana: string; }
 ```
 
+See also: [`UATransaction`](#types-3), [`TransactionsResponse`](#types-3), [`TokenTransactionFilter`](#types-3), [`TokenTransactionsResponse`](#types-3) in the [Transaction History](#transaction-history) section.
+
 ---
 
 ## Constants
@@ -438,6 +443,103 @@ import {
 ---
 
 ## Advanced
+
+### Transaction History
+
+Query the Universal Account's transaction history. Results are cached (30s TTL, LRU) to avoid redundant API calls when paginating.
+
+#### Page-based pagination
+
+```typescript
+const { transactions, page, pageSize } = await client.getTransactions(1, 10);
+
+for (const tx of transactions) {
+  console.log(tx.transactionId, tx.targetToken.symbol, tx.change.amountInUSD);
+}
+
+// Next page
+const page2 = await client.getTransactions(2, 10);
+```
+
+#### Filter by token and chain (cursor-based)
+
+```typescript
+import { CHAIN } from '@particle-network/universal-deposit';
+
+// Get USDC transactions on Ethereum
+const result = await client.getTokenTransactions({
+  chainId: CHAIN.ETHEREUM,
+  address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC contract
+});
+
+// Paginate with cursor
+if (result.nextPageToken) {
+  const nextPage = await client.getTokenTransactions(
+    { chainId: CHAIN.ETHEREUM, address: '0xA0b8...' },
+    result.nextPageToken,
+  );
+}
+```
+
+#### Single transaction lookup
+
+```typescript
+const tx = await client.getTransaction('tx_abc123');
+console.log(tx.status, tx.change.amount, tx.fromChains, tx.toChains);
+```
+
+#### Types
+
+```typescript
+interface UATransaction {
+  transactionId: string;
+  tag: string;
+  createdAt: string;
+  updatedAt: string;
+  targetToken: {
+    name: string;
+    type: string;
+    image: string;
+    price: number;
+    symbol: string;
+    address: string;
+    assetId: string;
+    chainId: number;
+    decimals: number;
+    realDecimals: number;
+    isPrimaryToken: boolean;
+    isSmartRouterSupported: boolean;
+  };
+  change: {
+    amount: string;
+    amountInUSD: string;
+    from: string;
+    to: string;
+  };
+  detail: {
+    redPacketCount: number;
+  };
+  status: number;
+  fromChains: number[];
+  toChains: number[];
+}
+
+interface TransactionsResponse {
+  transactions: UATransaction[];
+  page: number;
+  pageSize: number;
+}
+
+interface TokenTransactionFilter {
+  chainId: number;   // Chain ID to filter by
+  address: string;   // Token contract address
+}
+
+interface TokenTransactionsResponse {
+  transactions: UATransaction[];
+  nextPageToken?: string;  // Cursor for next page (undefined = no more pages)
+}
+```
 
 ### Custom Particle Credentials
 
