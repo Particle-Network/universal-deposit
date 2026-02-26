@@ -112,13 +112,30 @@ async function verifyWithKey(
   throw new Error(`Unsupported JWT algorithm: ${alg}`);
 }
 
+export interface JwtVerifierOptions {
+  /** JWKS endpoint URL */
+  jwksUrl: string;
+  /** Expected `iss` claim. Skipped if not set. */
+  expectedIssuer?: string;
+  /** Expected `aud` claim. Skipped if not set. */
+  expectedAudience?: string;
+}
+
 export class JwtVerifier {
   private readonly jwksUrl: string;
+  private readonly expectedIssuer?: string;
+  private readonly expectedAudience?: string;
   private cache: JwksCacheEntry | null = null;
   private fetchPromise: Promise<JwkKey[]> | null = null;
 
-  constructor(jwksUrl: string) {
-    this.jwksUrl = jwksUrl;
+  constructor(jwksUrlOrOptions: string | JwtVerifierOptions) {
+    if (typeof jwksUrlOrOptions === 'string') {
+      this.jwksUrl = jwksUrlOrOptions;
+    } else {
+      this.jwksUrl = jwksUrlOrOptions.jwksUrl;
+      this.expectedIssuer = jwksUrlOrOptions.expectedIssuer;
+      this.expectedAudience = jwksUrlOrOptions.expectedAudience;
+    }
   }
 
   /**
@@ -159,6 +176,22 @@ export class JwtVerifier {
       throw new Error('JWT signature verification failed');
     }
 
+    // Enforce issuer claim when configured
+    if (this.expectedIssuer && payload.iss !== this.expectedIssuer) {
+      throw new Error(`JWT issuer mismatch: expected "${this.expectedIssuer}", got "${payload.iss ?? 'none'}"`);
+    }
+
+    // Enforce audience claim when configured
+    if (this.expectedAudience) {
+      const aud = payload.aud;
+      const audMatch = Array.isArray(aud)
+        ? aud.includes(this.expectedAudience)
+        : aud === this.expectedAudience;
+      if (!audMatch) {
+        throw new Error(`JWT audience mismatch: expected "${this.expectedAudience}", got "${String(aud ?? 'none')}"`);
+      }
+    }
+
     return payload;
   }
 
@@ -180,10 +213,12 @@ export class JwtVerifier {
       if (refreshedMatch) return refreshedMatch;
     }
 
-    // Fall back to the first key whose type matches the algorithm
+    // Fall back to a key whose type matches the algorithm, preferring use:"sig"
     if (alg) {
-      const fallback = keys.find((k) => this.algMatchesKty(alg, k.kty));
-      if (fallback) return fallback;
+      const candidates = keys.filter((k) => this.algMatchesKty(alg, k.kty));
+      const sigKey = candidates.find((k) => k.use === 'sig');
+      if (sigKey) return sigKey;
+      if (candidates.length > 0) return candidates[0];
     }
 
     // Last resort: single-key JWKS without kid

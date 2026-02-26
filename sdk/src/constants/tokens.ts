@@ -4,6 +4,30 @@
 
 import { CHAIN } from './chains';
 
+/**
+ * The zero address is the UA SDK convention for native tokens (ETH, SOL, BNB).
+ * It is NOT a placeholder — it identifies the chain's native asset.
+ */
+export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+/**
+ * Returns true if the address is the zero address (native token marker)
+ * or otherwise not a real deployed contract address.
+ */
+export function isPlaceholderAddress(address: string): boolean {
+  return address === ZERO_ADDRESS;
+}
+
+/**
+ * Returns true if the given chain has at least one non-zero-address token
+ * entry in TOKEN_ADDRESSES (i.e. a real stablecoin contract we can sweep to).
+ */
+export function hasValidSweepTargets(chainId: number): boolean {
+  const entries = TOKEN_ADDRESSES[chainId];
+  if (!entries) return false;
+  return Object.values(entries).some((addr) => !isPlaceholderAddress(addr));
+}
+
 export const TOKEN_ADDRESSES: Record<number, Record<string, string>> = {
   [CHAIN.ETHEREUM]: {
     usdc: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
@@ -40,9 +64,7 @@ export const TOKEN_ADDRESSES: Record<number, Record<string, string>> = {
     usdc: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff',
     usdt: '0xA219439258ca9da29E9Cc4cE5596924745e12B93',
   },
-  [CHAIN.HYPERVM]: {
-    usdt: '0x0000000000000000000000000000000000000000', // Placeholder - needs actual address
-  },
+  // HyperEVM: no stablecoin contracts deployed — native-only chain
   [CHAIN.MANTLE]: {
     usdt: '0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE',
   },
@@ -51,16 +73,14 @@ export const TOKEN_ADDRESSES: Record<number, Record<string, string>> = {
     usdt: '0x1E4a5963aBFD975d8c9021ce480b42188849D41d',
   },
   [CHAIN.MONAD]: {
-    usdc: '0x0000000000000000000000000000000000000000', // Placeholder - needs actual address
+    usdc: '0x754704Bc059F8C67012fEd69BC8A327a5aafb603',
   },
   [CHAIN.SONIC]: {
-    usdc: '0x0000000000000000000000000000000000000000', // Placeholder - needs actual address
+    usdc: '0x29219dd400f2Bf60E5a23d13Be72B486D4038894',
   },
-  [CHAIN.PLASMA]: {
-    usdt: '0x0000000000000000000000000000000000000000', // Placeholder - needs actual address
-  },
+  // Plasma: no stablecoin contracts deployed — native-only chain
   [CHAIN.BERACHAIN]: {
-    usdc: '0x0000000000000000000000000000000000000000', // Placeholder - needs actual address
+    usdc: '0x549943e04f40284185054145c6E4e9568C1D3241',
   },
   [CHAIN.SOLANA]: {
     usdc: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
@@ -129,11 +149,11 @@ const DUST_THRESHOLD_USD = 0.10;
 
 /**
  * Returns true if the USD value is above the dust threshold and should
- * be treated as a real balance. Returns true for unknown/zero USD values
- * (erring on the side of showing the balance rather than hiding it).
+ * be treated as a real balance. Returns false for zero/negative USD values
+ * (unpriced balances treated as dust to avoid sweeping worthless amounts).
  */
 export function isAboveDustThreshold(amountUSD: number): boolean {
-  if (amountUSD <= 0) return true;
+  if (amountUSD <= 0) return false;
   return amountUSD > DUST_THRESHOLD_USD;
 }
 
