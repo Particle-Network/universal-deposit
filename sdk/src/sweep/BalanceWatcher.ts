@@ -265,6 +265,25 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
       // Skip dust — residual amounts from partial sweeps
       if (amount > 0n && !isAboveDustThreshold(valueUSD)) continue;
 
+      // Enforce minValueUSD with 2% tolerance for price fluctuation
+      const effectiveMinUSD = this.config.minValueUSD * 0.98;
+      if (this.config.minValueUSD > 0 && valueUSD > 0 && valueUSD < effectiveMinUSD) {
+        if (!this.belowThresholdKeys.has(key)) {
+          this.logger.log(`[BalanceWatcher] Existing balance below minValueUSD ($${valueUSD.toFixed(4)} < $${effectiveMinUSD.toFixed(2)}): ${tokenType.toUpperCase()} on chain ${chainId}`);
+          this.belowThresholdKeys.add(key);
+          this.emit('deposit:below_threshold', {
+            id: `${key}:${Date.now()}`,
+            token: tokenType.toUpperCase() as TokenType,
+            chainId,
+            amount: amount.toString(),
+            amountUSD: valueUSD,
+            rawAmount: amount,
+            detectedAt: Date.now(),
+          });
+        }
+        continue;
+      }
+
       if (amount > 0n && meetsMinimumDeposit(amount, tokenType, chainId)) {
         if (this.processingKeys.has(key)) continue;
 
@@ -361,9 +380,24 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
       // Skip dust — residual amounts from partial sweeps
       if (!isAboveDustThreshold(deltaUSD)) continue;
 
-      // Enforce minValueUSD config (documented but previously not checked here)
-      if (this.config.minValueUSD > 0 && deltaUSD > 0 && deltaUSD < this.config.minValueUSD) {
-        this.logger.log(`[BalanceWatcher] Skipping deposit below minValueUSD ($${deltaUSD.toFixed(2)} < $${this.config.minValueUSD}): ${tokenType.toUpperCase()} on chain ${chainId}`);
+      // Enforce minValueUSD config with 2% tolerance for price fluctuation
+      // (e.g. 1 USDC may report as $0.9985 due to stablecoin price drift)
+      const effectiveMinUSD = this.config.minValueUSD * 0.98;
+      if (this.config.minValueUSD > 0 && deltaUSD > 0 && deltaUSD < effectiveMinUSD) {
+        this.logger.log(`[BalanceWatcher] Deposit below minValueUSD ($${deltaUSD.toFixed(4)} < $${effectiveMinUSD.toFixed(2)}): ${tokenType.toUpperCase()} on chain ${chainId}`);
+
+        if (!this.belowThresholdKeys.has(key)) {
+          this.belowThresholdKeys.add(key);
+          this.emit('deposit:below_threshold', {
+            id: `${key}:${Date.now()}`,
+            token: tokenType.toUpperCase() as TokenType,
+            chainId,
+            amount: deltaAmount.toString(),
+            amountUSD: deltaUSD,
+            rawAmount: deltaAmount,
+            detectedAt: Date.now(),
+          });
+        }
         continue;
       }
 

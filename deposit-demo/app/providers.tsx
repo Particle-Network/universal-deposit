@@ -27,10 +27,13 @@ export function Providers({ children }: { children: ReactNode }) {
         config={{
           destination: {
             chainId: CHAIN.POLYGON,
+        
             // address: "CUSTOM_DESTINATION_ADDRESS", // Default: User's connected wallet address
           },
+          pollingIntervalMs: 3000,
           autoSweep: true,
           minValueUSD: 1,
+          logger: console,
         }}
       >
         {children}

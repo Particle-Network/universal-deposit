@@ -980,12 +980,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       this.logger.warn(`[DepositSDK] Max refund attempts (${maxAttempts}) reached for ${deposit.id}`);
       this.emit('refund:failed', deposit, new RefundError('Max refund attempts exceeded', deposit.id, deposit.chainId), true);
 
-      // Return to watching
-      if (this.balanceWatcher?.isActive()) {
-        this.setStatus('watching');
-      } else {
-        this.setStatus('ready');
-      }
+      // Resume detection that was suppressed at the start of the sweep
+      this.resumeDetectionIfIdle();
       return;
     }
 
@@ -1054,12 +1050,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
 
     if (this.destroyed) return;
 
-    // Return to watching
-    if (this.balanceWatcher?.isActive()) {
-      this.setStatus('watching');
-    } else {
-      this.setStatus('ready');
-    }
+    // Resume detection that was suppressed at the start of the sweep
+    this.resumeDetectionIfIdle();
   }
 
   /**

@@ -42,6 +42,7 @@ import {
   DEFAULT_CLIENT_KEY,
   DEFAULT_APP_ID,
   DEFAULT_JWT_SERVICE_URL,
+  DEFAULT_MIN_VALUE_USD,
 } from "../../constants";
 
 /**
@@ -177,6 +178,12 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
   // Without this, effect re-fires (from dep changes) can create orphaned
   // DepositClient instances that keep polling with stale destinations.
   const clientInitializingRef = useRef(false);
+  // When an init attempt is skipped because another is in-flight, this ref
+  // signals the in-flight init to re-trigger the effect via initRetryCount
+  // once it completes. Without this, the skipped init is silently lost and
+  // the client may never initialise.
+  const pendingInitRef = useRef(false);
+  const [initRetryCount, setInitRetryCount] = useState(0);
   const connectionLockRef = useRef<Promise<void> | null>(null);
   // Destination set by useDeposit BEFORE connect(), so initClient picks it up
   const pendingDestinationRef = useRef<DestinationConfig | undefined>(undefined);
@@ -291,6 +298,10 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     };
 
     const handleBelowThreshold = (deposit: DetectedDeposit) => {
+      // Skip dust amounts — tiny residuals from partial sweeps (e.g. 0.0013 SOL)
+      // shouldn't clutter the activity list with "Recover" buttons
+      if (deposit.amountUSD < DEFAULT_MIN_VALUE_USD) return;
+
       setRecentActivity((prev) => {
         const exists = prev.some(
           (item) =>
@@ -526,8 +537,10 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
       // re-fires during the async gap (before clientRef.current is set)
       // would create multiple DepositClient instances.
       if (clientInitializingRef.current) {
+        pendingInitRef.current = true;
         return;
       }
+      pendingInitRef.current = false;
       clientInitializingRef.current = true;
 
       try {
@@ -622,6 +635,12 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
         setIsConnecting(false);
       } finally {
         clientInitializingRef.current = false;
+        // If another init was requested while we were busy (via the guard
+        // above), re-trigger the effect so the new attempt can proceed.
+        if (pendingInitRef.current) {
+          pendingInitRef.current = false;
+          setInitRetryCount((c) => c + 1);
+        }
       }
     };
 
@@ -635,12 +654,15 @@ function DepositProviderInner({ config, children }: DepositProviderInnerProps) {
     // - `config` is read via configRef to avoid re-firing on every parent
     //   render (object literals create new references each time).
     // - `isConnected` is derived from auth core state already in deps.
+    // - `initRetryCount` re-triggers the effect when an init was skipped
+    //   because another was already in-flight (see pendingInitRef).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     authCoreConnected,
     authCoreAddress,
     authCoreProvider,
     setupClientListeners,
+    initRetryCount,
   ]);
 
   const connect = useCallback(

@@ -145,7 +145,7 @@ export class RefundService {
     }
 
     // Try to find original sender if refundToSender is enabled
-    let refundAddress: string;
+    let refundAddress: string | undefined;
     let isOriginalSender = false;
 
     if (this.config.refundConfig.refundToSender) {
