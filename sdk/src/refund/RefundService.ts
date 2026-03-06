@@ -145,7 +145,7 @@ export class RefundService {
     }
 
     // Try to find original sender if refundToSender is enabled
-    let refundAddress: string;
+    let refundAddress: string | undefined;
     let isOriginalSender = false;
 
     if (this.config.refundConfig.refundToSender) {
@@ -173,7 +173,7 @@ export class RefundService {
     }
 
     // Fall back to owner address if no valid sender found
-    if (!refundAddress!) {
+    if (!refundAddress) {
       const ownerAddressType = this.detectAddressType(this.config.ownerAddress);
 
       if (ownerAddressType !== sourceAddressType) {
@@ -345,6 +345,9 @@ export class RefundService {
       tokenAddress = chainConfig[tokenLower];
     }
 
+    // The zero address is the UA SDK convention for native tokens (ETH, SOL, BNB).
+    // When tokenAddress is undefined (native asset), we pass the zero address
+    // so the UA SDK identifies it as the chain's native token.
     const tokenConfig = tokenAddress
       ? { chainId, address: tokenAddress }
       : { chainId, address: '0x0000000000000000000000000000000000000000' };

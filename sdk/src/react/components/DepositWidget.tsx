@@ -14,6 +14,7 @@ import type {
 } from "../../core/types";
 import { CHAIN_META, getChainName } from "../../constants/chains";
 import { getTokenDecimals, getMinDepositAmount } from "../../constants/tokens";
+import { DEFAULT_MIN_VALUE_USD } from "../../constants";
 import { useDepositContext } from "../context/DepositContext";
 import type { ActivityItem } from "../types";
 import {
@@ -345,6 +346,9 @@ export function DepositWidget({
     };
 
     const handleBelowThreshold = (deposit: DetectedDeposit) => {
+      // Skip dust amounts — tiny residuals from partial sweeps
+      if (deposit.amountUSD < DEFAULT_MIN_VALUE_USD) return;
+
       setLocalActivity((prev) => {
         const exists = prev.some(
           (item) =>

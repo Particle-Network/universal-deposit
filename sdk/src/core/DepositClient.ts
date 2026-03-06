@@ -46,7 +46,7 @@ import {
   isValidEvmAddress,
   isValidSolanaAddress,
 } from '../constants';
-import { DEFAULT_SUPPORTED_TOKENS, isAboveDustThreshold } from '../constants/tokens';
+import { DEFAULT_SUPPORTED_TOKENS, isAboveDustThreshold, hasValidSweepTargets } from '../constants/tokens';
 import { IntermediaryService } from '../intermediary';
 
 /** Truncate an address for safe logging: 0x1234...5678 */
@@ -56,6 +56,7 @@ function truncateAddress(address: string): string {
 }
 import { UAManager } from '../universal-account';
 import { BalanceWatcher, Sweeper } from '../sweep';
+import { normalizeTokenType, parseBigInt } from '../utils/token-utils';
 
 export interface ResolvedConfig {
   /** Project ID for UA operations (user-supplied or SDK default). */
@@ -210,6 +211,13 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
           `Invalid EVM address format for destination on ${getChainName(chainId)}: ${address}`
         );
       }
+    }
+
+    // Validate destination chain has real token addresses we can sweep to
+    if (!hasValidSweepTargets(chainId)) {
+      throw new ConfigurationError(
+        `Destination chain ${getChainName(chainId)} (${chainId}) has no valid sweep targets (no stablecoin contracts deployed).`
+      );
     }
 
     // Log warning if destination address differs from owner
@@ -559,7 +567,7 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
     const deposits: DetectedDeposit[] = [];
 
     for (const asset of primaryAssets.assets) {
-      const tokenType = this.normalizeTokenType(asset.tokenType);
+      const tokenType = normalizeTokenType(asset.tokenType);
       if (!tokenType) continue;
 
       const chainAgg = asset.chainAggregation || [];
@@ -567,7 +575,7 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
         const chainId = Number(chain.token?.chainId || chain.chainId);
         if (!chainId) continue;
 
-        const rawAmount = this.parseBigInt(chain.rawAmount);
+        const rawAmount = parseBigInt(chain.rawAmount);
         const valueUSD = Number(chain.amountInUSD || 0);
 
         // Include non-zero balances above dust threshold
@@ -844,32 +852,6 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
   }
 
   /**
-   * Normalize token type string to lowercase
-   */
-  private normalizeTokenType(tokenType: string | undefined): string | null {
-    if (!tokenType) return null;
-    const normalized = tokenType.toLowerCase();
-    if (['eth', 'usdc', 'usdt', 'btc', 'sol', 'bnb'].includes(normalized)) {
-      return normalized;
-    }
-    return null;
-  }
-
-  /**
-   * Parse a value to BigInt safely
-   */
-  private parseBigInt(value: string | number | bigint | undefined): bigint {
-    if (value === undefined || value === null) return 0n;
-    try {
-      if (typeof value === 'bigint') return value;
-      if (typeof value === 'number') return BigInt(Math.floor(value));
-      return BigInt(value);
-    } catch {
-      return 0n;
-    }
-  }
-
-  /**
    * Handle a detected deposit.
    *
    * Uses a retryKey (token:chainId) to deduplicate re-detections after
@@ -998,12 +980,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
       this.logger.warn(`[DepositSDK] Max refund attempts (${maxAttempts}) reached for ${deposit.id}`);
       this.emit('refund:failed', deposit, new RefundError('Max refund attempts exceeded', deposit.id, deposit.chainId), true);
 
-      // Return to watching
-      if (this.balanceWatcher?.isActive()) {
-        this.setStatus('watching');
-      } else {
-        this.setStatus('ready');
-      }
+      // Resume detection that was suppressed at the start of the sweep
+      this.resumeDetectionIfIdle();
       return;
     }
 
@@ -1072,12 +1050,8 @@ export class DepositClient extends TypedEventEmitter<DepositEvents> {
 
     if (this.destroyed) return;
 
-    // Return to watching
-    if (this.balanceWatcher?.isActive()) {
-      this.setStatus('watching');
-    } else {
-      this.setStatus('ready');
-    }
+    // Resume detection that was suppressed at the start of the sweep
+    this.resumeDetectionIfIdle();
   }
 
   /**

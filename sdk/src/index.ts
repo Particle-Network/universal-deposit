@@ -64,6 +64,9 @@ export {
   CHAIN_TOKEN_DECIMALS,
   getTokenDecimals,
   DEFAULT_SUPPORTED_TOKENS,
+  ZERO_ADDRESS,
+  isPlaceholderAddress,
+  hasValidSweepTargets,
   DEFAULT_JWT_SERVICE_URL,
   DEFAULT_MIN_VALUE_USD,
   DEFAULT_POLLING_INTERVAL_MS,
@@ -84,6 +87,9 @@ export type { UAManagerConfig, SmartAccountOptions, PrimaryAsset, PrimaryAssetsR
 // Sweep (for advanced use)
 export { BalanceWatcher, Sweeper } from './sweep';
 export type { BalanceWatcherConfig, BalanceSnapshot, SweeperConfig, SweepAttempt } from './sweep';
+
+// Utilities
+export { normalizeTokenType, parseBigInt } from './utils/token-utils';
 
 // Refund (for advanced use)
 export { RefundService, DEFAULT_REFUND_CONFIG } from './refund';

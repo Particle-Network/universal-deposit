@@ -188,7 +188,7 @@ export type SweepStatus = 'success' | 'failed' | 'pending';
 export interface SweepResult {
   depositId: string;
   transactionId: string;
-  explorerUrl: string;
+  explorerUrl?: string;
   status: SweepStatus;
   error?: string;
 }

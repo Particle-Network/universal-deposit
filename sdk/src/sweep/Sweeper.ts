@@ -18,6 +18,7 @@ import type { UAManager } from '../universal-account';
 import type { DetectedDeposit, SweepResult, AuthCoreProvider, Logger } from '../core/types';
 import { SweepError } from '../core/errors';
 import { TOKEN_ADDRESSES, CHAIN, getChainName } from '../constants';
+import { isPlaceholderAddress } from '../constants/tokens';
 import { encodeERC20Transfer, toSmallestUnit } from './erc20';
 import { extractFeeBreakdown, calculateOptimalAmount, deriveLpRate } from './fee-math';
 
@@ -120,9 +121,10 @@ export class Sweeper {
             this.pendingCount--;
           }
         })
-        .catch(() => {
+        .catch((error) => {
           // Ensure queue chain is never broken.
           // Individual errors are forwarded via reject() above.
+          this.logger.warn('[Sweeper] Sweep queue catch:', error);
         });
     });
   }
@@ -320,10 +322,12 @@ export class Sweeper {
 
     this.logger.log(`[Sweeper] Success! Swept to ${target.label}`);
 
+    const transactionId = tx.rootHash || null;
+
     return {
       depositId: deposit.id,
-      transactionId: tx.rootHash || `sweep-${Date.now()}`,
-      explorerUrl: this.getExplorerUrl(target.chainId, tx.rootHash),
+      transactionId: transactionId ?? `sweep-${Date.now()}`,
+      explorerUrl: transactionId ? this.getExplorerUrl(target.chainId, transactionId) : undefined,
       status: 'success',
     };
   }
@@ -340,7 +344,7 @@ export class Sweeper {
     const isUsdcDeposit = token === 'usdc';
 
     // 1. Primary: USDC on destination chain via createUniversalTransaction
-    if (destConfig.usdc) {
+    if (destConfig.usdc && !isPlaceholderAddress(destConfig.usdc)) {
       targets.push({
         chainId: targetChainId,
         tokenAddress: destConfig.usdc,
@@ -351,7 +355,7 @@ export class Sweeper {
     }
 
     // 2. Secondary: USDC.e (bridged) on destination
-    if (destConfig.usdc_e) {
+    if (destConfig.usdc_e && !isPlaceholderAddress(destConfig.usdc_e)) {
       targets.push({
         chainId: targetChainId,
         tokenAddress: destConfig.usdc_e,
@@ -400,17 +404,28 @@ export class Sweeper {
   }
 
   /**
-   * Get explorer URL for a transaction
+   * Get explorer URL for a transaction.
+   * Returns undefined for chains without known block explorers.
    */
-  private getExplorerUrl(chainId: number, txHash: string): string {
+  private getExplorerUrl(chainId: number, txHash: string): string | undefined {
     const explorers: Record<number, string> = {
       [CHAIN.ETHEREUM]: 'https://etherscan.io/tx/',
-      [CHAIN.ARBITRUM]: 'https://arbiscan.io/tx/',
-      [CHAIN.BASE]: 'https://basescan.org/tx/',
-      [CHAIN.POLYGON]: 'https://polygonscan.com/tx/',
+      [CHAIN.OPTIMISM]: 'https://optimistic.etherscan.io/tx/',
       [CHAIN.BNB]: 'https://bscscan.com/tx/',
+      [CHAIN.POLYGON]: 'https://polygonscan.com/tx/',
+      [CHAIN.BASE]: 'https://basescan.org/tx/',
+      [CHAIN.ARBITRUM]: 'https://arbiscan.io/tx/',
+      [CHAIN.AVALANCHE]: 'https://snowscan.xyz/tx/',
+      [CHAIN.LINEA]: 'https://lineascan.build/tx/',
+      [CHAIN.MANTLE]: 'https://mantlescan.xyz/tx/',
+      [CHAIN.MERLIN]: 'https://scan.merlinchain.io/tx/',
+      [CHAIN.XLAYER]: 'https://www.okx.com/web3/explorer/xlayer/tx/',
+      [CHAIN.SONIC]: 'https://sonicscan.org/tx/',
+      [CHAIN.BERACHAIN]: 'https://berascan.com/tx/',
+      [CHAIN.SOLANA]: 'https://solscan.io/tx/',
     };
-    const base = explorers[chainId] || 'https://etherscan.io/tx/';
+    const base = explorers[chainId];
+    if (!base) return undefined;
     return `${base}${txHash}`;
   }
 }

@@ -9,6 +9,7 @@ import type { UAManager, PrimaryAssetsResponse } from '../universal-account';
 import type { DetectedDeposit, TokenType, Logger } from '../core/types';
 import { TypedEventEmitter } from '../core/EventEmitter';
 import { meetsMinimumDeposit, isAboveDustThreshold } from '../constants/tokens';
+import { normalizeTokenType, parseBigInt } from '../utils/token-utils';
 
 export interface BalanceSnapshot {
   balances: Map<string, bigint>;
@@ -169,16 +170,16 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
     const deposits: DetectedDeposit[] = [];
 
     for (const asset of primaryAssets.assets) {
-      const tokenType = this.normalizeTokenType(asset.tokenType);
+      const tokenType = normalizeTokenType(asset.tokenType);
       if (!tokenType) continue;
       if (!this.config.supportedTokens.includes(tokenType.toUpperCase())) continue;
 
       const chainAgg = asset.chainAggregation || [];
       for (const chain of chainAgg) {
-        const chainId = Number(chain.chainId);
+        const chainId = Number(chain.token?.chainId || chain.chainId);
         if (!this.config.supportedChains.includes(chainId)) continue;
 
-        const rawAmount = this.parseBigInt(chain.rawAmount);
+        const rawAmount = parseBigInt(chain.rawAmount);
         const valueUSD = Number(chain.amountInUSD || 0);
 
         if (rawAmount > 0n && isAboveDustThreshold(valueUSD) && meetsMinimumDeposit(rawAmount, tokenType, chainId)) {
@@ -264,6 +265,25 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
       // Skip dust — residual amounts from partial sweeps
       if (amount > 0n && !isAboveDustThreshold(valueUSD)) continue;
 
+      // Enforce minValueUSD with 2% tolerance for price fluctuation
+      const effectiveMinUSD = this.config.minValueUSD * 0.98;
+      if (this.config.minValueUSD > 0 && valueUSD > 0 && valueUSD < effectiveMinUSD) {
+        if (!this.belowThresholdKeys.has(key)) {
+          this.logger.log(`[BalanceWatcher] Existing balance below minValueUSD ($${valueUSD.toFixed(4)} < $${effectiveMinUSD.toFixed(2)}): ${tokenType.toUpperCase()} on chain ${chainId}`);
+          this.belowThresholdKeys.add(key);
+          this.emit('deposit:below_threshold', {
+            id: `${key}:${Date.now()}`,
+            token: tokenType.toUpperCase() as TokenType,
+            chainId,
+            amount: amount.toString(),
+            amountUSD: valueUSD,
+            rawAmount: amount,
+            detectedAt: Date.now(),
+          });
+        }
+        continue;
+      }
+
       if (amount > 0n && meetsMinimumDeposit(amount, tokenType, chainId)) {
         if (this.processingKeys.has(key)) continue;
 
@@ -306,7 +326,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
     const usdValues = new Map<string, number>();
 
     for (const asset of primaryAssets.assets) {
-      const tokenType = this.normalizeTokenType(asset.tokenType);
+      const tokenType = normalizeTokenType(asset.tokenType);
       if (!tokenType) continue;
 
       const chainAgg = asset.chainAggregation || [];
@@ -316,7 +336,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
         if (!chainId) continue;
 
         const key = `${tokenType}:${chainId}`;
-        const rawAmount = this.parseBigInt(chain.rawAmount);
+        const rawAmount = parseBigInt(chain.rawAmount);
         const valueUSD = Number(chain.amountInUSD || 0);
 
         balances.set(key, rawAmount);
@@ -351,19 +371,46 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
 
       const deltaAmount = currentAmount - prevAmount;
 
+      // Compute proportional delta USD: if we only saw a partial increase,
+      // attribute a proportional share of the total USD value.
+      const deltaUSD = currentAmount === 0n
+        ? 0
+        : (Number(deltaAmount) / Number(currentAmount)) * valueUSD;
+
       // Skip dust — residual amounts from partial sweeps
-      if (!isAboveDustThreshold(valueUSD)) continue;
+      if (!isAboveDustThreshold(deltaUSD)) continue;
+
+      // Enforce minValueUSD config with 2% tolerance for price fluctuation
+      // (e.g. 1 USDC may report as $0.9985 due to stablecoin price drift)
+      const effectiveMinUSD = this.config.minValueUSD * 0.98;
+      if (this.config.minValueUSD > 0 && deltaUSD > 0 && deltaUSD < effectiveMinUSD) {
+        this.logger.log(`[BalanceWatcher] Deposit below minValueUSD ($${deltaUSD.toFixed(4)} < $${effectiveMinUSD.toFixed(2)}): ${tokenType.toUpperCase()} on chain ${chainId}`);
+
+        if (!this.belowThresholdKeys.has(key)) {
+          this.belowThresholdKeys.add(key);
+          this.emit('deposit:below_threshold', {
+            id: `${key}:${Date.now()}`,
+            token: tokenType.toUpperCase() as TokenType,
+            chainId,
+            amount: deltaAmount.toString(),
+            amountUSD: deltaUSD,
+            rawAmount: deltaAmount,
+            detectedAt: Date.now(),
+          });
+        }
+        continue;
+      }
 
       // Only detect increases above per-token minimum
       if (meetsMinimumDeposit(deltaAmount, tokenType, chainId)) {
-        this.logger.log(`[BalanceWatcher] New deposit: ${tokenType.toUpperCase()} on chain ${chainId} ($${valueUSD.toFixed(2)})`);
+        this.logger.log(`[BalanceWatcher] New deposit: ${tokenType.toUpperCase()} on chain ${chainId} ($${deltaUSD.toFixed(2)})`);
 
         deposits.push({
           id: `${key}:${Date.now()}`,
           token: tokenType.toUpperCase() as TokenType,
           chainId,
           amount: deltaAmount.toString(),
-          amountUSD: valueUSD,
+          amountUSD: deltaUSD,
           rawAmount: deltaAmount,
           detectedAt: Date.now(),
         });
@@ -376,7 +423,7 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
           token: tokenType.toUpperCase() as TokenType,
           chainId,
           amount: deltaAmount.toString(),
-          amountUSD: valueUSD,
+          amountUSD: deltaUSD,
           rawAmount: deltaAmount,
           detectedAt: Date.now(),
         });
@@ -386,29 +433,4 @@ export class BalanceWatcher extends TypedEventEmitter<BalanceWatcherEvents> {
     return deposits;
   }
 
-  /**
-   * Normalize token type string
-   */
-  private normalizeTokenType(tokenType: string | undefined): string | null {
-    if (!tokenType) return null;
-    const normalized = tokenType.toLowerCase();
-    if (['eth', 'usdc', 'usdt', 'btc', 'sol', 'bnb'].includes(normalized)) {
-      return normalized;
-    }
-    return null;
-  }
-
-  /**
-   * Parse a value to BigInt safely
-   */
-  private parseBigInt(value: string | number | bigint | undefined): bigint {
-    if (value === undefined || value === null) return 0n;
-    try {
-      if (typeof value === 'bigint') return value;
-      if (typeof value === 'number') return BigInt(Math.floor(value));
-      return BigInt(value);
-    } catch {
-      return 0n;
-    }
-  }
 }
