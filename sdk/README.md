@@ -8,6 +8,26 @@ Cross-chain deposit infrastructure powered by [Particle Network](https://particl
 npm install @particle-network/universal-deposit
 ```
 
+## Styles
+
+The React components (`DepositWidget`, `DepositModal`, `RecoveryWidget`, `RecoveryModal`) use Tailwind utility classes. The SDK ships a pre-built CSS file that you must import in your app:
+
+```css
+/* In your global CSS file */
+@import "@particle-network/universal-deposit/styles.css";
+```
+
+Or in a JS/TS entry point:
+
+```ts
+import '@particle-network/universal-deposit/styles.css';
+```
+
+> **Tailwind v4 users:** If you prefer to avoid duplicate utility CSS, you can skip the import above and add `@source` directives in your CSS instead:
+> ```css
+> @source "../node_modules/@particle-network/universal-deposit/dist/**/*.mjs";
+> ```
+
 ## Quick Start
 
 ### React (Modal)
