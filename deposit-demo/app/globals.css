@@ -1,4 +1,2 @@
 @import "tailwindcss";
-
-@source "../node_modules/@particle-network/deposit-sdk/dist/**/*.js";
-@source "../node_modules/@particle-network/deposit-sdk/dist/**/*.mjs";
+@import "@particle-network/deposit-sdk/styles.css";

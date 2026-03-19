@@ -1,0 +1,29 @@
+@import "tailwindcss/theme";
+@import "tailwindcss/utilities";
+@source "./";
+
+/*
+ * Custom animation utilities used by DepositModal and RecoveryModal.
+ * Replicates the subset of tailwindcss-animate the SDK needs.
+ */
+@keyframes enter {
+  from {
+    opacity: var(--tw-enter-opacity, 1);
+    transform: scale(var(--tw-enter-scale, 1));
+  }
+}
+
+@utility animate-in {
+  animation-name: enter;
+  animation-duration: 150ms;
+  --tw-enter-opacity: initial;
+  --tw-enter-scale: initial;
+}
+
+@utility fade-in {
+  --tw-enter-opacity: 0;
+}
+
+@utility zoom-in-95 {
+  --tw-enter-scale: 0.95;
+}

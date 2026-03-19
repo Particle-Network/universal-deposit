@@ -112,7 +112,7 @@ async function verifyWithKey(
   throw new Error(`Unsupported JWT algorithm: ${alg}`);
 }
 
-export interface JwtVerifierOptions {
+interface JwtVerifierOptions {
   /** JWKS endpoint URL */
   jwksUrl: string;
   /** Expected `iss` claim. Skipped if not set. */
